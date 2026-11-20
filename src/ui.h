@@ -9,6 +9,9 @@ struct GLFWwindow;
 // It is always 1 on a Mac, which scales windows by itself.
 float getMonitorScale();
 
+// Size factor used for the panel and the other sizes on screen
+float getUiScale();
+
 // Width of the control panel on the right side of the window, in window units
 float getPanelWidth();
 

@@ -37,7 +37,14 @@ glm::mat4 cameraView(const Camera& camera) {
 
 // The projection matrix with a 45 degree field of view
 glm::mat4 cameraProjection(float aspect) {
-  return glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+  float fov = glm::radians(45.0f);
+
+  // A narrow strip gets a taller field of view so its width still sees 45 degrees
+  // and the model fits across it.
+  if (aspect < 1.0f) {
+    fov = 2.0f * glm::atan(glm::tan(fov / 2.0f) / aspect);
+  }
+  return glm::perspective(fov, aspect, 0.1f, 100.0f);
 }
 
 

@@ -68,6 +68,7 @@ add_executable(viewer
   src/camera.cpp
   src/main.cpp
   src/mesh.cpp
+  src/renderer.cpp
   src/shader.cpp
   src/ui.cpp)
 target_link_libraries(viewer PRIVATE glad glfw glm::glm imgui)

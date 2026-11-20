@@ -7,7 +7,7 @@
 struct Camera {
   float yaw = 0.0f;
   float pitch = 20.0f;
-  float distance = 3.0f;
+  float distance = 3.6f;
   glm::vec3 target = glm::vec3(0.0f);
 };
 

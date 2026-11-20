@@ -9,9 +9,11 @@ pure NPR and hybrid versions of the same model side by side under a light you ca
 
 Final project for CSCI 420 Computer Graphics at the University of Southern California, Fall 2026.
 
-> **Status: early development.** The window, the control panel and a Phong-lit test sphere with an
-> orbit camera work. The PBR and NPR shading described below is not written yet. The build steps
-> have been checked on Windows; macOS and Linux are not tested yet.
+> **Status: early development.** The window, the control panel, an orbit camera and a test sphere
+> work. The sphere already uses the hybrid shader with its four blend sliders and is shown as
+> PBR, Hybrid and NPR side by side, but each lighting term is still a simple placeholder
+> formula: the real PBR and NPR shading described below is not written yet. The build steps have
+> been checked on Windows; macOS and Linux are not tested yet.
 
 ## What it does
 
@@ -107,12 +109,41 @@ with OpenGL 4.1" means the driver does not offer OpenGL 4.1; updating it usually
 | `Esc` | Quit |
 
 The control panel on the right shows the frame rate and OpenGL version, Reset camera and Reset light
-buttons, the light direction and the Phong material settings. The window opens maximized.
+buttons, the light direction, intensity and ambient color, the base color, metallic, roughness and
+shininess, and the four blend sliders (Shadow, Diffuse, Specular, Ambient). A blend slider at 0 uses
+the physical version of that term and at 1 the stylized version; values in between mix the two. The
+small PBR and NPR labels above the sliders mark these two ends, and hovering a slider says the same.
+Each slider has a small number box next to it where you can type a value and press Enter.
+For now the terms are placeholders, for example the stylized diffuse is just two flat bands. The
+Shadow slider has no visible effect yet, because there are no shadows until the shadow map is added.
+The window opens maximized.
 
-Planned: middle mouse drag to pan, `1` `2` `3` `4` to show PBR only, NPR only, hybrid only or all
-three side by side, and `Tab` to show or hide the panel. The panel will get the four blend weights,
-exposure and tone mapping, the ramp, the model and material, and debug views that show one input or
-one lighting term on its own.
+The View mode menu at the top of the panel picks which versions of the sphere you see next to each
+other. There are three views: PBR uses only the physical terms (all blend sliders at 0), NPR uses
+only the stylized terms (all at 1), and Hybrid uses the slider values, so the sliders only change
+the Hybrid view. "PBR | Hybrid | NPR" shows all three, and the other modes show one view or a pair.
+PBR is always on the left and NPR on the right. All views share one camera and one light, so
+dragging the mouse anywhere left of the panel turns all of them together. Narrow views get a wider
+field of view from top to bottom, so the sphere still fits across each one.
+
+The Debug view menu under it shows one value on its own in every view: Default is the normal
+picture, then base color, metallic, roughness, the surface normal (as a color, x red, y green, z
+blue), shadow visibility (white everywhere until shadows are added), and the diffuse, specular or
+ambient term alone. Metallic and roughness are not used by the placeholder shading yet.
+
+Each view also shows a faint grid on the floor under the sphere, with the X axis line in red and
+the Z axis line in blue, and a small set of axes in its bottom left corner: X red, Y green, Z blue.
+The corner axes turn with the camera, so they show which way you are looking. The Show grid and
+Show axes checkboxes under the Debug view menu turn them on and off.
+
+The shader is split into four files in `shaders/`: `common.glsl` (shared values), `pbr_terms.glsl`
+(physical side), `npr_terms.glsl` (stylized side) and `hybrid_main.glsl` (mixes the two). The
+program joins them in that order. If a file has an error, `R` keeps the old picture and the console
+shows the file name and line.
+
+Planned: middle mouse drag to pan, `1` `2` `3` `4` as shortcuts for the view modes, and `Tab` to
+show or hide the panel. The panel will get exposure and tone
+mapping, the ramp, and the model and material.
 
 ## Documentation
 

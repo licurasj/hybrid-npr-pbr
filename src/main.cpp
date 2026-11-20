@@ -6,9 +6,11 @@
 #include <cstdio>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "camera.h"
 #include "mesh.h"
+#include "renderer.h"
 #include "settings.h"
 #include "shader.h"
 #include "ui.h"
@@ -24,10 +26,12 @@ Settings settings;
 // The orbit camera
 Camera camera;
 
-// Shader files, in the folder that CMake passes in as SHADER_DIR
+// Shader folder that CMake passes in as SHADER_DIR
 // On another computer that folder does not exist, so main switches to the shaders folder next to the program.
-std::string vertexShaderPath = std::string(SHADER_DIR) + "mesh.vert";
-std::string fragmentShaderPath = std::string(SHADER_DIR) + "phong.frag";
+std::string shaderFolder = SHADER_DIR;
+
+// The fragment shader is joined from these files in this order
+std::vector<std::string> fragmentFiles = { "common.glsl", "pbr_terms.glsl", "npr_terms.glsl", "hybrid_main.glsl" };
 
 
 // Function declarations
@@ -39,12 +43,8 @@ void handleMouse(GLFWwindow* window);
 void scrollCallback(GLFWwindow* window, double xOffset, double yOffset);
 
 // Shaders
-// Build the shaders again and keep the old ones if that fails
-void reloadShaders(GLuint& program);
-
-// Drawing
-// Draw the sphere with the camera and the light
-void drawScene(GLuint program, const Mesh& mesh, int width, int height);
+// Build both shader programs again and keep the old one of each that fails
+void reloadShaders(GLuint& program, GLuint& lineProgram);
 
 
 // Mouse input
@@ -105,39 +105,25 @@ void scrollCallback(GLFWwindow* window, double xOffset, double yOffset) {
 
 // Build the shaders again from the files
 // If the new version has an error, the old program stays in use.
-void reloadShaders(GLuint& program) {
-  GLuint newProgram = loadShaderProgram(vertexShaderPath, fragmentShaderPath);
+// The sphere shader and the line shader are checked one by one.
+void reloadShaders(GLuint& program, GLuint& lineProgram) {
+  GLuint newProgram = loadShaderProgram(shaderFolder, "mesh.vert", fragmentFiles);
   if (newProgram == 0) {
     std::printf("Keeping the old shaders\n");
-    return;
+  } else {
+    glDeleteProgram(program);
+    program = newProgram;
+    std::printf("Shaders reloaded\n");
   }
-  glDeleteProgram(program);
-  program = newProgram;
-  std::printf("Shaders reloaded\n");
-}
 
-
-// Drawing
-
-// Draw the mesh with the camera and the light
-void drawScene(GLuint program, const Mesh& mesh, int width, int height) {
-  // Guard against a height of 0 when the window is minimized
-  float aspect = (height > 0) ? (float)width / height : 1.0f;
-
-  glUseProgram(program);
-  setUniform(program, "uModel", glm::mat4(1.0f));
-  setUniform(program, "uView", cameraView(camera));
-  setUniform(program, "uProjection", cameraProjection(aspect));
-  setUniform(program, "uCameraPos", cameraPosition(camera));
-
-  // The light direction points from the surface toward the light
-  setUniform(program, "uLightDir", directionFromAngles(settings.lightYaw, settings.lightPitch));
-  setUniform(program, "uBaseColor", settings.baseColor);
-  setUniform(program, "uAmbient", settings.ambient);
-  setUniform(program, "uDiffuse", settings.diffuse);
-  setUniform(program, "uSpecular", settings.specular);
-  setUniform(program, "uShininess", settings.shininess);
-  drawMesh(mesh);
+  GLuint newLineProgram = loadShaderPair(shaderFolder, "line.vert", "line.frag");
+  if (newLineProgram == 0) {
+    std::printf("Keeping the old line shaders\n");
+  } else {
+    glDeleteProgram(lineProgram);
+    lineProgram = newLineProgram;
+    std::printf("Line shaders reloaded\n");
+  }
 }
 
 
@@ -194,14 +180,14 @@ int main() {
   glfwGetCursorPos(window, &lastMouseX, &lastMouseY);
 
   // Use the shaders folder in the current folder when the source folder is not on this computer
-  if (!std::ifstream(vertexShaderPath)) {
-    vertexShaderPath = "shaders/mesh.vert";
-    fragmentShaderPath = "shaders/phong.frag";
+  if (!std::ifstream(shaderFolder + "mesh.vert")) {
+    shaderFolder = "shaders/";
   }
 
   // Load the shaders
-  GLuint program = loadShaderProgram(vertexShaderPath, fragmentShaderPath);
-  if (program == 0) {
+  GLuint program = loadShaderProgram(shaderFolder, "mesh.vert", fragmentFiles);
+  GLuint lineProgram = loadShaderPair(shaderFolder, "line.vert", "line.frag");
+  if (program == 0 || lineProgram == 0) {
     std::printf("Could not load the shaders, stopping\n");
     shutdownUi();
     glfwTerminate();
@@ -211,6 +197,12 @@ int main() {
 
   // The sphere we light
   Mesh sphere = createSphere(64, 128);
+
+  // A 20 by 20 floor grid at the bottom of the sphere, which has a radius of 1
+  LineMesh grid = createGrid(20, -1.0f);
+
+  // Axes for the small indicator in the corner of each view
+  LineMesh axes = createAxes(AXIS_LENGTH);
 
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_MULTISAMPLE);
@@ -242,7 +234,7 @@ int main() {
     // R reloads the shaders once per key press, not every frame it is held
     bool reloadKeyDown = !typing && glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS;
     if (reloadKeyDown && !reloadKeyWasDown) {
-      reloadShaders(program);
+      reloadShaders(program, lineProgram);
     }
     reloadKeyWasDown = reloadKeyDown;
 
@@ -261,17 +253,25 @@ int main() {
     }
 
     // Neutral dark gray background, a little darker than the panel
+    // The whole window is cleared before the strips are drawn.
     glClearColor(0.15f, 0.15f, 0.15f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    glViewport(0, 0, sceneWidth, height);
-    drawScene(program, sphere, sceneWidth, height);
+    // The scene is drawn in strips, one per view of the view mode
+    drawScene(program, lineProgram, sphere, grid, axes, camera, settings, sceneWidth, height);
 
     // The panel is drawn last so it sits on top
     drawUi();
 
     glfwSwapBuffers(window);
   }
+
+  // Free the buffers and shaders while the OpenGL context still exists
+  deleteMesh(sphere);
+  deleteLines(grid);
+  deleteLines(axes);
+  glDeleteProgram(program);
+  glDeleteProgram(lineProgram);
 
   shutdownUi();
   glfwTerminate();

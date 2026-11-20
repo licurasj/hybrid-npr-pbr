@@ -7,6 +7,7 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 
+#include <cmath>
 #include <string>
 
 
@@ -24,6 +25,12 @@ std::string glVersionText;
 // Size factor of the main monitor
 float getMonitorScale() {
   return ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor());
+}
+
+
+// Size factor used for the panel and the other sizes on screen
+float getUiScale() {
+  return uiScale;
 }
 
 
@@ -71,9 +78,9 @@ static void applyPanelTheme() {
   colors[ImGuiCol_ButtonHovered] = ImVec4(0.33f, 0.33f, 0.33f, 1.0f);
   colors[ImGuiCol_ButtonActive] = accent;
 
-  // The blue accent only marks the parts you drag
-  colors[ImGuiCol_SliderGrab] = accent;
-  colors[ImGuiCol_SliderGrabActive] = accentBright;
+  // Slider handles are light gray, a bit lighter while dragged
+  colors[ImGuiCol_SliderGrab] = ImVec4(0.50f, 0.50f, 0.50f, 1.0f);
+  colors[ImGuiCol_SliderGrabActive] = ImVec4(0.60f, 0.60f, 0.60f, 1.0f);
   colors[ImGuiCol_CheckMark] = accentBright;
   colors[ImGuiCol_TextSelectedBg] = ImVec4(0.29f, 0.53f, 0.80f, 0.4f);
 
@@ -87,6 +94,57 @@ static void applyPanelTheme() {
   style.WindowBorderSize = 1.0f;
   style.FrameRounding = 3.0f;
   style.GrabRounding = 3.0f;
+}
+
+
+// Names in the debug view menu, in the order the shader checks them
+static const char* const DEBUG_VIEW_NAMES[] = {
+  "Default", "Base color", "Metallic", "Roughness", "Normal",
+  "Shadow visibility", "Diffuse only", "Specular only", "Ambient only",
+};
+
+
+// Width of the number box next to each slider, wide enough for -180.0
+static float numberBoxWidth() {
+  return ImGui::CalcTextSize("-180.0").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+}
+
+
+// A slider bar, a small number box and the label on one row
+// Both change the same value, so dragging updates the box and typing moves the bar.
+// A typed value is kept inside the slider range, and a value that is not a real number is ignored.
+static void sliderWithBox(const char* label, float* value, float min, float max,
+                          const char* format, const char* tip = nullptr) {
+  float gap = ImGui::GetStyle().ItemInnerSpacing.x;
+  ImGui::PushID(label);
+
+  // The bar has no number inside, the box shows it instead
+  // Typing into the bar itself is turned off because the box is there for typing.
+  ImGui::SetNextItemWidth(ImGui::CalcItemWidth() - numberBoxWidth() - gap);
+  ImGui::SliderFloat("##bar", value, min, max, "", ImGuiSliderFlags_NoInput);
+  if (tip != nullptr) {
+    ImGui::SetItemTooltip("%s", tip);
+  }
+
+  ImGui::SameLine(0.0f, gap);
+  ImGui::SetNextItemWidth(numberBoxWidth());
+  float oldValue = *value;
+  if (ImGui::InputFloat("##box", value, 0.0f, 0.0f, format)) {
+    // Text such as nan or inf is not a number we can use, so keep the old value
+    if (!std::isfinite(*value)) {
+      *value = oldValue;
+    }
+    if (*value < min) {
+      *value = min;
+    }
+    if (*value > max) {
+      *value = max;
+    }
+  }
+
+  ImGui::SameLine(0.0f, gap);
+  ImGui::TextUnformatted(label);
+  ImGui::PopID();
 }
 
 
@@ -139,6 +197,21 @@ void buildUi(Settings& settings, Camera& camera) {
   // Default values to go back to with the reset buttons
   Settings defaults;
 
+  // PBR (the physical look) is always on the left and NPR (the stylized look) on the right
+  if (ImGui::CollapsingHeader("View", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Combo("View mode", &settings.viewMode,
+                 "PBR | Hybrid | NPR\0PBR\0Hybrid\0NPR\0"
+                 "PBR | Hybrid\0Hybrid | NPR\0PBR | NPR\0");
+
+    // Shows one input or one lighting term on its own in every view
+    ImGui::Combo("Debug view", &settings.debugView, DEBUG_VIEW_NAMES,
+                 IM_ARRAYSIZE(DEBUG_VIEW_NAMES));
+
+    // Floor grid under the sphere and the small axes in the corner of each view
+    ImGui::Checkbox("Show grid", &settings.showGrid);
+    ImGui::Checkbox("Show axes", &settings.showAxes);
+  }
+
   if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
     if (ImGui::Button("Reset camera")) {
       camera = Camera();
@@ -146,20 +219,42 @@ void buildUi(Settings& settings, Camera& camera) {
   }
 
   if (ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
-    ImGui::SliderFloat("Yaw", &settings.lightYaw, -180.0f, 180.0f);
-    ImGui::SliderFloat("Pitch", &settings.lightPitch, -89.0f, 89.0f);
+    sliderWithBox("Yaw", &settings.lightYaw, -180.0f, 180.0f, "%.1f");
+    sliderWithBox("Pitch", &settings.lightPitch, -89.0f, 89.0f, "%.1f");
+    sliderWithBox("Intensity", &settings.lightIntensity, 0.0f, 10.0f, "%.2f");
+    ImGui::ColorEdit3("Ambient color", &settings.ambientColor.x);
     if (ImGui::Button("Reset light")) {
       settings.lightYaw = defaults.lightYaw;
       settings.lightPitch = defaults.lightPitch;
+      settings.lightIntensity = defaults.lightIntensity;
+      settings.ambientColor = defaults.ambientColor;
     }
   }
 
   if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
     ImGui::ColorEdit3("Base color", &settings.baseColor.x);
-    ImGui::SliderFloat("Ambient", &settings.ambient, 0.0f, 1.0f);
-    ImGui::SliderFloat("Diffuse", &settings.diffuse, 0.0f, 1.0f);
-    ImGui::SliderFloat("Specular", &settings.specular, 0.0f, 1.0f);
-    ImGui::SliderFloat("Shininess", &settings.shininess, 1.0f, 256.0f);
+    sliderWithBox("Metallic", &settings.metallic, 0.0f, 1.0f, "%.2f");
+    sliderWithBox("Roughness", &settings.roughness, 0.0f, 1.0f, "%.2f");
+    sliderWithBox("Shininess", &settings.shininess, 1.0f, 256.0f, "%.1f");
+  }
+
+  // 0 is the physical version of a term and 1 the stylized one
+  if (ImGui::CollapsingHeader("Blend", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // PBR over the left end of the slider bars and NPR over the right end
+    // The bars end where the number boxes start.
+    float barLeft = ImGui::GetCursorPosX();
+    float gap = ImGui::GetStyle().ItemInnerSpacing.x;
+    float barRight = barLeft + ImGui::CalcItemWidth() - numberBoxWidth() - gap;
+    ImGui::TextDisabled("PBR");
+    ImGui::SameLine(barRight - ImGui::CalcTextSize("NPR").x);
+    ImGui::TextDisabled("NPR");
+
+    // The same tooltip on every blend slider
+    const char* blendTip = "0 = PBR, 1 = NPR";
+    sliderWithBox("Shadow", &settings.weights[0], 0.0f, 1.0f, "%.2f", blendTip);
+    sliderWithBox("Diffuse", &settings.weights[1], 0.0f, 1.0f, "%.2f", blendTip);
+    sliderWithBox("Specular", &settings.weights[2], 0.0f, 1.0f, "%.2f", blendTip);
+    sliderWithBox("Ambient", &settings.weights[3], 0.0f, 1.0f, "%.2f", blendTip);
   }
 
   ImGui::PopItemWidth();

@@ -67,7 +67,7 @@ glad and stb.
 moves the light. `R` reloads the shaders.
 
 **Files.** `src/shader.h/.cpp`, `src/mesh.h/.cpp`, `src/camera.h/.cpp`, `shaders/mesh.vert`,
-`shaders/phong.frag` (temporary, replaced in the term skeleton).
+`shaders/phong.frag` (temporary; the term skeleton replaces it with the four shader files).
 
 **How.**
 
@@ -100,7 +100,7 @@ moves the light. `R` reloads the shaders.
    - `worldPos = uModel * vec4(position, 1)`
    - `worldNormal = mat3(transpose(inverse(uModel))) * normal`
    - `gl_Position = uProjection * uView * worldPos`
-5. `phong.frag`.
+5. `phong.frag` (later replaced by the four shader files of the term skeleton).
    - `R = reflect(-L, N)`
    - `color = ka * base + kd * base * max(N.L, 0) + ks * pow(max(dot(R, V), 0), shininess)`
 6. `glEnable(GL_DEPTH_TEST)` once at startup. `glfwGetKey(window, GLFW_KEY_R)` triggers reload.
@@ -142,12 +142,19 @@ written at the same time in separate files.
 5. Debug view: `if (uDebugView == 1) { fragColor = vec4(s.baseColor, 1); return; }` and so on for
    metallic, roughness, normal (`N * 0.5 + 0.5`), visibility and each single term.
 6. `settings.h`: `float weights[4]`, `int viewMode`, `int debugView`.
-7. Comparison view in `renderer`: for strip i from 0 to 2,
-   - `glEnable(GL_SCISSOR_TEST)`
-   - `glViewport(i * w / 3, 0, w / 3, h)` and `glScissor` with the same numbers
-   - projection aspect is `(w / 3) / h`
-   - send weights: all 0, the slider values, all 1
+7. Comparison view in `renderer`: the view mode gives the list of views (PBR, Hybrid, NPR or a
+   part of it) and so the number of strips, `count`. Then `glEnable(GL_SCISSOR_TEST)`, and for
+   strip i from 0 to count - 1:
+   - edges `left = i * w / count` and `right = (i + 1) * w / count`, `stripWidth = right - left`
+   - skip the strip if `stripWidth` or `h` is below 1
+   - `glViewport(left, 0, stripWidth, h)` and `glScissor` with the same numbers
+   - projection aspect is `float(stripWidth) / float(h)`; a strip narrower than it is tall gets a
+     wider vertical field of view, so the model still fits across it
+   - send weights: all 0 for PBR, the slider values for Hybrid, all 1 for NPR
    - draw the model
+
+   After the loop, `glDisable(GL_SCISSOR_TEST)`, or the next frame's clear only reaches the last
+   strip.
 8. UI: `ImGui::SliderFloat("Diffuse", &settings.weights[1], 0, 1)` for each weight,
    `ImGui::Combo` for view mode and debug view.
 

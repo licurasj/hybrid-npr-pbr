@@ -39,7 +39,7 @@ Put your name next to a part when you start it, and update the status when it wo
 |---|---|---|
 | Project skeleton | Lucas | Done |
 | Phong sphere | Lucas | Done |
-| Term skeleton and comparison view | Lucas | Up next |
+| Term skeleton and comparison view | Lucas | Done |
 | HDR and color | | Not started |
 | glTF loading | | Not started |
 | Test materials | | Not started |
@@ -58,7 +58,7 @@ Put your name next to a part when you start it, and update the status when it wo
 |---|---|---|---|---|---|
 | Project skeleton | A window with a background color and an empty control panel | Both | 4 | nothing | Nov 20 |
 | Phong sphere | A lit sphere. The mouse orbits the camera and moves the light. `R` reloads the shaders | Both | 5 | Project skeleton | Nov 21 |
-| Term skeleton and comparison view | Three views side by side, four blend sliders, a debug view menu. Simple placeholder shading for now | Both | 7 | Phong sphere | Nov 24 |
+| Term skeleton and comparison view | Three views side by side, four blend sliders, a debug view menu, a floor grid and an axis indicator. Simple placeholder shading for now | Both | 7 | Phong sphere | Nov 24 |
 | HDR and color | Same picture, now tone mapped, with an exposure slider | Both | 5 | Phong sphere | Nov 23 |
 | glTF loading | A sample model with its textures | Both | 9 | Phong sphere | Nov 26 |
 | Test materials | Cloth, leather, metal, stone and wood on the sphere, picked from a menu | Both | 8 | Phong sphere | Nov 27 |
@@ -174,4 +174,5 @@ the test materials and come back to it later.
 | Cloth sheen | A soft bright edge on cloth at grazing angles | 4 | Cook-Torrance |
 | Stretched highlight | For brushed metal or satin | 5 | Cook-Torrance, Normal mapping |
 | Accurate reflections | Rough reflections that match the reference viewer | 8 | Environment lighting |
-| Per-region mask | A model where each region has its own blend, set by a mask texture | 6 | glTF loading, Hybrid polish |
+| Blend per material | Each material of a model (cloth, skin, hair) gets its own four blend sliders, saved in presets, e.g. PBR cloth with NPR skin and hair | 3 | glTF loading, Hybrid polish |
+| Per-region mask | A painted mask texture fine-tunes the blend inside a material, e.g. a soft fade from skin to sleeve. Works on top of the per-material blend | 6 | Blend per material |
