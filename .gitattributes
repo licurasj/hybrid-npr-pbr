@@ -1,0 +1,17 @@
+# Text files use LF line endings on every platform
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets are never converted or merged as text
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.hdr binary
+*.exr binary
+*.ktx2 binary
+*.glb binary
+*.bin binary
+*.ttf binary
+*.pdf binary
+*.zip binary

@@ -1,0 +1,45 @@
+# Build output
+/build/
+/build-*/
+/out/
+/bin/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CMakeUserPresets.json
+compile_commands.json
+*.o
+*.obj
+*.exe
+*.pdb
+*.ilk
+
+# Editor and IDE files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.swp
+xcuserdata/
+*.xcworkspace/
+
+# Operating system files
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# Program state written at run time
+imgui.ini
+/screenshots/tmp/
+
+# Local notes and scratch files stay out of the repository
+/notes/
+/scratch/
+/transfers/
+*.log
+*.local.json
+*.local.toml
+.env
+.env.*
