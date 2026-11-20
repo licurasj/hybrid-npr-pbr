@@ -31,6 +31,27 @@ Each part has a label so you know what kind of work it is:
 Only the first two parts are open at the start, so one of us does those. Meanwhile the other can
 set up their machine and look for nice free textures and models.
 
+## Progress
+
+Put your name next to a part when you start it, and update the status when it works.
+
+| Part | Who | Status |
+|---|---|---|
+| Project skeleton | Lucas | Done |
+| Phong sphere | Lucas | Done |
+| Term skeleton and comparison view | Lucas | Up next |
+| HDR and color | | Not started |
+| glTF loading | | Not started |
+| Test materials | | Not started |
+| Ramp shading and stylized highlight | | Not started |
+| Cook-Torrance | | Not started |
+| Shadow map | | Not started |
+| Shadow in the ramp | | Not started |
+| Environment lighting | | Not started |
+| Hybrid polish | | Not started |
+| Reference check | | Not started |
+| Demo and report material | | Not started |
+
 ## The parts
 
 | Part | What you'll see when it works | Side | Hours | Needs first | Aim for |
