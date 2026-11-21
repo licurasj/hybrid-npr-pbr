@@ -162,7 +162,7 @@ mapping, the ramp, and the model and material.
 | [Dear ImGui](https://github.com/ocornut/imgui) | 1.93.0 | Control panel | MIT |
 | [glad](https://github.com/Dav1dde/glad) | 2.0.8 | OpenGL 4.1 core function loader, generated into `third_party/glad` | Generated files: WTFPL or CC0, with Apache 2.0 for the parts from the Khronos registry |
 | [stb_image](https://github.com/nothings/stb) | not added yet | Image loading | Public domain or MIT |
-| [tinygltf](https://github.com/syoyo/tinygltf) | not added yet | glTF model loading | MIT |
+| [Assimp](https://github.com/assimp/assimp) | not added yet | Model loading (glTF, and others such as OBJ and FBX) | BSD 3-Clause |
 
 ### Assets
 

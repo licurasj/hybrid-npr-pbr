@@ -27,7 +27,7 @@ material class hierarchy.
 | `shader` | Reads GLSL files, joins them, compiles, links, reports errors, sets uniforms, reloads on request | A program id |
 | `texture` | Loads images with stb_image and creates GPU textures with the right color space. Builds the environment cubemap | Texture ids |
 | `mesh` | Holds one vertex array (positions, normals, UVs) and draws it. Can generate a sphere | A drawable mesh |
-| `model` | Reads a glTF file with tinygltf and turns it into meshes and materials | A list of mesh and material pairs |
+| `model` | Reads a model file with Assimp (glTF first, but OBJ and FBX work too) and turns it into meshes and materials | A list of mesh and material pairs |
 | `material.h` | A plain struct: the texture ids and constant factors for one material | Bound by the renderer before drawing |
 | `framebuffer` | Creates the two off-screen targets: the shadow depth map and the HDR color target | Framebuffer and texture ids |
 | `renderer` | Runs the three passes for one frame | The final image on screen |

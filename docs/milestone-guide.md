@@ -205,6 +205,12 @@ tone curve and the sRGB conversion.
 **What gets done.** A `.gltf` or `.glb` file becomes a list of mesh and material pairs that the
 renderer can draw.
 
+**Heads up: we're switching the loader to Assimp.** We expect to mix models from different places,
+and Assimp reads OBJ and FBX as well as glTF. It can also work out tangents for us, which helps if
+we get to normal mapping. Steps 1 to 5 below were written for tinygltf, so they'll be rewritten
+when this part starts. Steps 6 to 8 (textures, shader, fitting the model on screen) should stay
+about the same. Assimp doesn't decode images itself, so we still need stb_image.
+
 **Files.** `src/model.h/.cpp`, `src/texture.h/.cpp`, `src/material.h`, `src/mesh.cpp`,
 `shaders/common.glsl` (texture reading).
 
