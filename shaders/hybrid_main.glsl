@@ -4,6 +4,8 @@
 
 in vec3 worldPos;
 in vec3 worldNormal;
+in vec2 texCoord;
+in vec2 texCoord1;
 
 out vec4 fragColor;
 
@@ -14,9 +16,13 @@ void main() {
   s.position = worldPos;
   s.N = normalize(worldNormal);
   s.V = normalize(uCameraPos - worldPos);
-  s.baseColor = uBaseColor;
-  s.metallic = uMetallic;
-  s.roughness = uRoughness;
+  // Each texture reads the first or the second set of texture coordinates
+  vec2 baseColorUV = (uBaseColorUVSet == 1) ? texCoord1 : texCoord;
+  vec2 metallicRoughnessUV = (uMetallicRoughnessUVSet == 1) ? texCoord1 : texCoord;
+  s.baseColor = texture(uBaseColorTexture, baseColorUV).rgb * uBaseColor;
+  vec4 metallicRoughness = texture(uMetallicRoughnessTexture, metallicRoughnessUV);
+  s.roughness = metallicRoughness.g * uRoughness;
+  s.metallic = metallicRoughness.b * uMetallic;
 
   Light l;
   l.L = normalize(uLightDir);

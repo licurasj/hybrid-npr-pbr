@@ -3,16 +3,21 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
 
 #include "camera.h"
 #include "mesh.h"
+#include "model.h"
 #include "renderer.h"
 #include "settings.h"
 #include "shader.h"
+#include "texture.h"
 #include "ui.h"
 
 
@@ -30,6 +35,9 @@ Camera camera;
 // On another computer that folder does not exist, so main switches to the shaders folder next to the program.
 std::string shaderFolder = SHADER_DIR;
 
+// Asset folder that CMake passes in as ASSET_DIR, with the same fallback as the shaders
+std::string assetFolder = ASSET_DIR;
+
 // The fragment shader is joined from these files in this order
 std::vector<std::string> fragmentFiles = { "common.glsl", "pbr_terms.glsl", "npr_terms.glsl", "hybrid_main.glsl" };
 
@@ -45,6 +53,12 @@ void scrollCallback(GLFWwindow* window, double xOffset, double yOffset);
 // Shaders
 // Build both shader programs again and keep the old one of each that fails
 void reloadShaders(GLuint& program, GLuint& lineProgram);
+
+// Models
+// The sphere as a model with one part, drawn with white textures and the panel's material
+Model createSphereModel();
+// Paths of the model files in a folder, sorted by name
+std::vector<std::string> findModelFiles(const std::string& folder);
 
 
 // Mouse input
@@ -127,8 +141,61 @@ void reloadShaders(GLuint& program, GLuint& lineProgram) {
 }
 
 
+// Models
+
+// The sphere as a model with one part
+// White 1 x 1 textures make the shader use the factors as they are,
+// and the main loop copies the panel's base color, metallic and roughness into them.
+Model createSphereModel() {
+  Model sphere;
+  GLuint white = createWhiteTexture();
+  sphere.textures.push_back(white);
+
+  ModelPart part;
+  part.mesh = createSphere(64, 128);
+  part.material.baseColorTexture.id = white;
+  part.material.metallicRoughnessTexture.id = white;
+  part.material.occlusionTexture.id = white;
+  part.material.emissiveTexture.id = white;
+  sphere.parts.push_back(part);
+
+  // A sphere with radius 1 around the origin
+  sphere.boundsMin = glm::vec3(-1.0f);
+  sphere.boundsMax = glm::vec3(1.0f);
+  return sphere;
+}
+
+
+// Paths of the glTF, GLB, OBJ and FBX files in a folder, sorted by name
+// A missing folder gives an empty list. Entries that cannot be read are skipped.
+std::vector<std::string> findModelFiles(const std::string& folder) {
+  std::vector<std::string> paths;
+  std::error_code error;
+  std::filesystem::directory_iterator it(folder, error);
+  std::filesystem::directory_iterator end;
+  // With an error code the calls report problems there instead of throwing
+  for (; !error && it != end; it.increment(error)) {
+    if (!it->is_regular_file(error)) {
+      continue;
+    }
+    // Lower case the extension, so ".GLB" counts too
+    // tolower needs a value that fits in unsigned char, so each character is converted first.
+    std::string extension = it->path().extension().string();
+    for (char& c : extension) {
+      c = (char)std::tolower((unsigned char)c);
+    }
+    if (extension == ".gltf" || extension == ".glb" || extension == ".obj" || extension == ".fbx") {
+      paths.push_back(it->path().generic_string());
+    }
+  }
+  std::sort(paths.begin(), paths.end());
+  return paths;
+}
+
+
 // Open the window, load everything once and run the frame loop
-int main() {
+// A model file can be named on the command line, for example: viewer model.glb
+int main(int argc, char** argv) {
   // Start GLFW
   if (!glfwInit()) {
     std::printf("Could not start GLFW\n");
@@ -195,11 +262,37 @@ int main() {
   }
   bool reloadKeyWasDown = false;
 
-  // The sphere we light
-  Mesh sphere = createSphere(64, 128);
+  // Use the assets folder in the current folder when the source folder is not on this computer
+  if (!std::filesystem::is_directory(assetFolder)) {
+    assetFolder = "assets/";
+  }
 
-  // A 20 by 20 floor grid at the bottom of the sphere, which has a radius of 1
-  LineMesh grid = createGrid(20, -1.0f);
+  // The model menu: the sphere first, then the files in assets/models
+  // modelPaths has the file of each menu entry, and an empty path for the sphere.
+  std::vector<std::string> modelNames = { "Sphere" };
+  std::vector<std::string> modelPaths = { "" };
+  for (const std::string& path : findModelFiles(assetFolder + "models")) {
+    modelNames.push_back(std::filesystem::path(path).filename().string());
+    modelPaths.push_back(path);
+  }
+
+  // A model file from the command line is added at the end of the menu and shown first
+  if (argc > 1) {
+    modelNames.push_back(std::filesystem::path(argv[1]).filename().string());
+    modelPaths.push_back(argv[1]);
+    settings.modelChoice = (int)modelPaths.size() - 1;
+  }
+
+  // The sphere stays loaded the whole time, a model file only while it is shown
+  Model sphere = createSphereModel();
+  Model fileModel;
+  int shownChoice = 0;
+
+  // Why the last model did not load, shown in the panel
+  std::string modelMessage;
+
+  // A 20 by 20 floor grid, which every model rests on
+  LineMesh grid = createGrid(20, FLOOR_HEIGHT);
 
   // Axes for the small indicator in the corner of each view
   LineMesh axes = createAxes(AXIS_LENGTH);
@@ -220,7 +313,7 @@ int main() {
 
     // Build the panel first so it knows whether it has the mouse this frame
     // before the camera and the keys look at the input.
-    buildUi(settings, camera);
+    buildUi(settings, camera, modelNames, modelMessage);
 
     // Keys are ignored while a number is being typed into the panel
     bool typing = uiWantsKeyboard();
@@ -237,6 +330,34 @@ int main() {
       reloadShaders(program, lineProgram);
     }
     reloadKeyWasDown = reloadKeyDown;
+
+    // Load the model picked in the menu
+    // If it does not load, the model that was shown stays and the menu goes back to it.
+    if (settings.modelChoice != shownChoice) {
+      if (settings.modelChoice == 0) {
+        deleteModel(fileModel);
+        shownChoice = 0;
+        modelMessage = "";
+      } else {
+        const std::string& path = modelPaths[settings.modelChoice];
+        Model newModel = loadModel(path);
+        if (newModel.parts.empty()) {
+          modelMessage = "Could not load " + modelNames[settings.modelChoice] + ": " + newModel.error;
+          settings.modelChoice = shownChoice;
+        } else {
+          deleteModel(fileModel);
+          fileModel = newModel;
+          shownChoice = settings.modelChoice;
+          modelMessage = "";
+        }
+      }
+    }
+
+    // The sphere takes its material from the panel
+    Material& sphereMaterial = sphere.parts[0].material;
+    sphereMaterial.baseColorFactor = glm::vec4(settings.baseColor, 1.0f);
+    sphereMaterial.metallicFactor = settings.metallic;
+    sphereMaterial.roughnessFactor = settings.roughness;
 
     // Use the framebuffer size, which differs from the window size on Mac Retina screens
     int width, height;
@@ -258,7 +379,8 @@ int main() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // The scene is drawn in strips, one per view of the view mode
-    drawScene(program, lineProgram, sphere, grid, axes, camera, settings, sceneWidth, height);
+    const Model& shownModel = (shownChoice == 0) ? sphere : fileModel;
+    drawScene(program, lineProgram, shownModel, grid, axes, camera, settings, sceneWidth, height);
 
     // The panel is drawn last so it sits on top
     drawUi();
@@ -267,7 +389,8 @@ int main() {
   }
 
   // Free the buffers and shaders while the OpenGL context still exists
-  deleteMesh(sphere);
+  deleteModel(sphere);
+  deleteModel(fileModel);
   deleteLines(grid);
   deleteLines(axes);
   glDeleteProgram(program);

@@ -27,6 +27,15 @@ struct Light {
 uniform vec3 uCameraPos;
 uniform vec3 uLightDir;
 uniform vec3 uLightRadiance;
+
+// Material of the part being drawn
+// Each texture value is multiplied by its factor. A material without a texture gets a 1 x 1 white
+// texture, so then the factor is used as it is.
+// glTF keeps roughness in the green channel and metallic in the blue channel of one texture.
+uniform sampler2D uBaseColorTexture;          // texture unit 0
+uniform sampler2D uMetallicRoughnessTexture;  // texture unit 1
+uniform int uBaseColorUVSet;                  // which texture coordinates each texture uses, 0 or 1
+uniform int uMetallicRoughnessUVSet;
 uniform vec3 uBaseColor;
 uniform float uMetallic;
 uniform float uRoughness;

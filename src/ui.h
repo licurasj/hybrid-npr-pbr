@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "camera.h"
 #include "settings.h"
 
@@ -20,7 +23,9 @@ void setupUi(GLFWwindow* window, float monitorScale);
 
 // Build the control panel for this frame
 // The camera is passed in for the reset button.
-void buildUi(Settings& settings, Camera& camera);
+// The model menu shows the model names, and the message under it says why a model did not load.
+void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>& modelNames,
+             const std::string& modelMessage);
 
 // Draw the control panel on top of the scene
 void drawUi();

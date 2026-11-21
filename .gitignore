@@ -10,6 +10,8 @@ CMakeUserPresets.json
 compile_commands.json
 *.o
 *.obj
+# but keep OBJ models in the assets folder
+!/assets/**/*.obj
 *.exe
 *.pdb
 *.ilk

@@ -41,7 +41,7 @@ Put your name next to a part when you start it, and update the status when it wo
 | Phong sphere | Lucas | Done |
 | Term skeleton and comparison view | Lucas | Done |
 | HDR and color | | Not started |
-| glTF loading | | Not started |
+| glTF loading | Lucas | Done |
 | Test materials | | Not started |
 | Ramp shading and stylized highlight | | Not started |
 | Cook-Torrance | | Not started |

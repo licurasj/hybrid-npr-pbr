@@ -9,7 +9,7 @@
 // Make a unit sphere with the given number of rows and columns
 // Rows go from the top pole to the bottom pole and columns go around the middle.
 Mesh createSphere(int stacks, int slices) {
-  // Each vertex is 8 floats, position then normal then texture coordinate
+  // Each vertex is position, normal, texture coordinate, tangent and second texture coordinate
   std::vector<float> vertices;
   for (int i = 0; i <= stacks; i++) {
     float theta = glm::pi<float>() * i / stacks;
@@ -24,6 +24,16 @@ Mesh createSphere(int stacks, int slices) {
       vertices.push_back(p.x);
       vertices.push_back(p.y);
       vertices.push_back(p.z);
+      vertices.push_back((float)j / slices);
+      vertices.push_back((float)i / stacks);
+
+      // The tangent points the way U grows, which is around the sphere
+      vertices.push_back(-glm::sin(phi));
+      vertices.push_back(0.0f);
+      vertices.push_back(glm::cos(phi));
+      vertices.push_back(1.0f);
+
+      // The second texture coordinate is a copy of the first one
       vertices.push_back((float)j / slices);
       vertices.push_back((float)i / stacks);
     }
@@ -45,7 +55,12 @@ Mesh createSphere(int stacks, int slices) {
     }
   }
 
-  // Upload to the GPU
+  return createMesh(vertices, indices);
+}
+
+
+// Upload vertices and triangle indices to the GPU
+Mesh createMesh(const std::vector<float>& vertices, const std::vector<unsigned int>& indices) {
   Mesh mesh;
   mesh.indexCount = (int)indices.size();
   glGenVertexArrays(1, &mesh.vao);
@@ -59,14 +74,19 @@ Mesh createSphere(int stacks, int slices) {
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
 
-  // Attribute 0 is the position, 1 the normal and 2 the texture coordinate
-  GLsizei stride = 8 * sizeof(float);
+  // Attribute 0 is the position, 1 the normal, 2 the texture coordinate, 3 the tangent
+  // and 4 the second texture coordinate
+  GLsizei stride = FLOATS_PER_VERTEX * sizeof(float);
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
   glEnableVertexAttribArray(0);
   glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
   glEnableVertexAttribArray(1);
   glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)(6 * sizeof(float)));
   glEnableVertexAttribArray(2);
+  glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, stride, (void*)(8 * sizeof(float)));
+  glEnableVertexAttribArray(3);
+  glVertexAttribPointer(4, 2, GL_FLOAT, GL_FALSE, stride, (void*)(12 * sizeof(float)));
+  glEnableVertexAttribArray(4);
 
   glBindVertexArray(0);
   return mesh;

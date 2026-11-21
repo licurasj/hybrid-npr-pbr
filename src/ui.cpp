@@ -172,7 +172,8 @@ void setupUi(GLFWwindow* window, float monitorScale) {
 
 
 // Build the control panel for this frame
-void buildUi(Settings& settings, Camera& camera) {
+void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>& modelNames,
+             const std::string& modelMessage) {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
@@ -207,9 +208,33 @@ void buildUi(Settings& settings, Camera& camera) {
     ImGui::Combo("Debug view", &settings.debugView, DEBUG_VIEW_NAMES,
                  IM_ARRAYSIZE(DEBUG_VIEW_NAMES));
 
-    // Floor grid under the sphere and the small axes in the corner of each view
+    // Floor grid under the model and the small axes in the corner of each view
     ImGui::Checkbox("Show grid", &settings.showGrid);
     ImGui::Checkbox("Show axes", &settings.showAxes);
+  }
+
+  // The sphere or one of the model files
+  // Picking an entry only changes the choice, and the main loop then loads the file.
+  if (ImGui::CollapsingHeader("Model", ImGuiTreeNodeFlags_DefaultOpen)) {
+    const char* shownName = modelNames[settings.modelChoice].c_str();
+    if (ImGui::BeginCombo("Model##choice", shownName)) {
+      for (int i = 0; i < (int)modelNames.size(); i++) {
+        bool selected = (i == settings.modelChoice);
+        // "##" and the number make each entry unique for ImGui, even when two files have the same name
+        std::string label = modelNames[i] + "##" + std::to_string(i);
+        if (ImGui::Selectable(label.c_str(), selected)) {
+          settings.modelChoice = i;
+        }
+      }
+      ImGui::EndCombo();
+    }
+
+    // A model that could not be loaded leaves a message in red
+    if (!modelMessage.empty()) {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.45f, 0.4f, 1.0f));
+      ImGui::TextWrapped("%s", modelMessage.c_str());
+      ImGui::PopStyleColor();
+    }
   }
 
   if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -232,6 +257,10 @@ void buildUi(Settings& settings, Camera& camera) {
   }
 
   if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // A model file brings its own base color, metallic and roughness
+    if (settings.modelChoice != 0) {
+      ImGui::TextDisabled("These values are used by the sphere only");
+    }
     ImGui::ColorEdit3("Base color", &settings.baseColor.x);
     sliderWithBox("Metallic", &settings.metallic, 0.0f, 1.0f, "%.2f");
     sliderWithBox("Roughness", &settings.roughness, 0.0f, 1.0f, "%.2f");

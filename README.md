@@ -32,8 +32,9 @@ Skin, hair, glass and anything that needs subsurface scattering or transmission 
 ## Requirements
 
 All platforms need a GPU and driver with OpenGL 4.1 core profile, CMake 3.24 or newer, Git, and an
-internet connection the first time you configure, because CMake downloads GLFW, GLM and Dear ImGui
-then. glad is already in `third_party/`.
+internet connection the first time you configure, because CMake downloads GLFW, GLM, Dear ImGui and
+Assimp then. Assimp brings its own copy of zlib, so you don't need zlib installed. glad and
+stb_image are already in `third_party/`.
 
 ### Windows
 
@@ -89,7 +90,7 @@ You can also double-click `viewer.exe`. A console window opens next to the viewe
 errors and other messages.
 
 If you received a ready-made `viewer.exe` for Windows, keep it in the same folder as the `shaders`
-folder and double-click it; nothing needs to be installed.
+and `assets` folders and double-click it; nothing needs to be installed.
 
 The program reads its shaders from the `shaders/` folder of the copy it was built from, so editing a
 shader and pressing `R` shows the change right away. If you move or rename the project folder,
@@ -118,20 +119,41 @@ For now the terms are placeholders, for example the stylized diffuse is just two
 Shadow slider has no visible effect yet, because there are no shadows until the shadow map is added.
 The window opens maximized.
 
-The View mode menu at the top of the panel picks which versions of the sphere you see next to each
+### Loading a model
+
+The Model menu in the panel lists "Sphere" and every model file in `assets/models/` (glTF `.gltf`
+and `.glb`, and also `.obj` and `.fbx`). Pick one and it replaces what is shown. A `.gltf` file
+needs its `.bin` file and its images next to it; a `.glb` file holds everything in one file. To
+try your own model, copy it into `assets/models/` and start the viewer again, or give its path when
+you start the program:
+
+```
+build\Release\viewer.exe C:\path\to\model.glb
+```
+
+The model is moved to the middle of the grid and scaled so its largest side is as big as the test
+sphere, with its bottom on the grid. It is drawn with its own base color, metallic and roughness
+values and textures; the Material sliders in the panel only change the sphere. Each texture uses
+the UV set (first or second) and the wrap and filter settings the file gives it. Texture transforms
+(the glTF KHR_texture_transform extension) are not applied yet; the console prints a warning when
+the base color or metallic-roughness texture has one. If a file cannot be
+loaded, the reason shows in red under the Model menu and in the console, and the model that was
+shown before stays.
+
+The View mode menu at the top of the panel picks which versions of the model you see next to each
 other. There are three views: PBR uses only the physical terms (all blend sliders at 0), NPR uses
 only the stylized terms (all at 1), and Hybrid uses the slider values, so the sliders only change
 the Hybrid view. "PBR | Hybrid | NPR" shows all three, and the other modes show one view or a pair.
 PBR is always on the left and NPR on the right. All views share one camera and one light, so
 dragging the mouse anywhere left of the panel turns all of them together. Narrow views get a wider
-field of view from top to bottom, so the sphere still fits across each one.
+field of view from top to bottom, so the model still fits across each one.
 
 The Debug view menu under it shows one value on its own in every view: Default is the normal
 picture, then base color, metallic, roughness, the surface normal (as a color, x red, y green, z
 blue), shadow visibility (white everywhere until shadows are added), and the diffuse, specular or
 ambient term alone. Metallic and roughness are not used by the placeholder shading yet.
 
-Each view also shows a faint grid on the floor under the sphere, with the X axis line in red and
+Each view also shows a faint grid on the floor under the model, with the X axis line in red and
 the Z axis line in blue, and a small set of axes in its bottom left corner: X red, Y green, Z blue.
 The corner axes turn with the camera, so they show which way you are looking. The Show grid and
 Show axes checkboxes under the Debug view menu turn them on and off.
@@ -143,7 +165,7 @@ shows the file name and line.
 
 Planned: middle mouse drag to pan, `1` `2` `3` `4` as shortcuts for the view modes, and `Tab` to
 show or hide the panel. The panel will get exposure and tone
-mapping, the ramp, and the model and material.
+mapping and the ramp.
 
 ## Documentation
 
@@ -161,8 +183,9 @@ mapping, the ramp, and the model and material.
 | [GLM](https://github.com/g-truc/glm) | 1.0.3 | Vector and matrix math | MIT |
 | [Dear ImGui](https://github.com/ocornut/imgui) | 1.93.0 | Control panel | MIT |
 | [glad](https://github.com/Dav1dde/glad) | 2.0.8 | OpenGL 4.1 core function loader, generated into `third_party/glad` | Generated files: WTFPL or CC0, with Apache 2.0 for the parts from the Khronos registry |
-| [stb_image](https://github.com/nothings/stb) | not added yet | Image loading | Public domain or MIT |
-| [Assimp](https://github.com/assimp/assimp) | not added yet | Model loading (glTF, and others such as OBJ and FBX) | BSD 3-Clause |
+| [stb_image](https://github.com/nothings/stb) | 2.30 | Image loading, copied into `third_party/stb` | MIT or public domain |
+| [Assimp](https://github.com/assimp/assimp) | 6.0.5 | Model loading (glTF, OBJ and FBX) | BSD 3-Clause |
+| [zlib](https://zlib.net/) | 1.2.13 | Unpacking compressed data for Assimp, built from the copy inside Assimp | zlib |
 
 ### Assets
 

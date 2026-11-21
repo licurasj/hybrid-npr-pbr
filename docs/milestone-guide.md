@@ -166,7 +166,8 @@ written at the same time in separate files.
 tone curve and the sRGB conversion.
 
 **Files.** `src/framebuffer.h/.cpp`, `shaders/fullscreen.vert`, `shaders/tonemap.frag`,
-`src/renderer.cpp`, `src/settings.h` (exposure, tone curve choice), `src/ui.cpp`.
+`src/renderer.cpp`, `src/texture.cpp`, `src/settings.h` (exposure, tone curve choice),
+`src/ui.cpp`.
 
 **How.**
 
@@ -197,60 +198,161 @@ tone curve and the sRGB conversion.
 6. Why the check numbers work: a white sphere with light intensity pi gives
    `1 / pi * 1 * pi = 1`, which is 255. At N.L = 0.5 the linear value 0.5 becomes 0.735 after the
    sRGB conversion, which is 188.
+7. Textures, in `texture.cpp`: right now every texture is uploaded as `GL_RGBA8`. In this part
+   the base color texture (and later the emissive one) switches to `GL_SRGB8_ALPHA8`, so the GPU
+   turns its colors into linear values when the shader reads them. Do it in the same change as
+   the output conversion, or the colors come out too dark. Metallic-roughness, normal and
+   occlusion textures hold data, not colors, so they stay `GL_RGBA8`.
+8. Debug views and the sRGB step: the metallic, roughness and normal views must skip the output
+   conversion and show their raw values, so they keep matching the Khronos glTF Sample Viewer.
+   That viewer converts only its Base Color view to sRGB for display, so ours can go through the
+   conversion like the lit image.
 
 ---
 
 ## glTF loading (Both)
 
-**What gets done.** A `.gltf` or `.glb` file becomes a list of mesh and material pairs that the
-renderer can draw.
+**What gets done.** A model file (`.gltf`, `.glb`, and also `.obj` or `.fbx`) becomes a list of
+mesh and material pairs that the renderer can draw.
 
-**Heads up: we're switching the loader to Assimp.** We expect to mix models from different places,
-and Assimp reads OBJ and FBX as well as glTF. It can also work out tangents for us, which helps if
-we get to normal mapping. Steps 1 to 5 below were written for tinygltf, so they'll be rewritten
-when this part starts. Steps 6 to 8 (textures, shader, fitting the model on screen) should stay
-about the same. Assimp doesn't decode images itself, so we still need stb_image.
+**About the loader.** We use Assimp. We expect to mix models from different places, and Assimp
+reads OBJ and FBX as well as glTF. It can also work out tangents for us, which helps if we get to
+normal mapping. Assimp doesn't decode the images for us, so stb_image does that. Only `model.cpp`
+includes Assimp headers; the rest of the program sees the plain `Model` struct.
 
-**Files.** `src/model.h/.cpp`, `src/texture.h/.cpp`, `src/material.h`, `src/mesh.cpp`,
-`shaders/common.glsl` (texture reading).
+**Files.** `CMakeLists.txt`, `src/model.h/.cpp`, `src/texture.h/.cpp`, `src/material.h`,
+`src/mesh.h/.cpp` (tangent and second UV attributes), `shaders/mesh.vert`,
+`src/renderer.cpp` (drawing and fitting),
+`shaders/common.glsl` and `shaders/hybrid_main.glsl` (texture reading), `src/main.cpp` and
+`src/ui.cpp` (model menu), `third_party/stb/stb_image.h`, `assets/models/`.
 
 **How.**
 
-1. In exactly one `.cpp`, define `TINYGLTF_IMPLEMENTATION`, `STB_IMAGE_IMPLEMENTATION` and
-   `STB_IMAGE_WRITE_IMPLEMENTATION` before including `tiny_gltf.h`. tinygltf uses stb_image
-   itself, so stb must not be implemented a second time elsewhere.
-2. Load: `tinygltf::TinyGLTF loader; tinygltf::Model model;` then
-   `loader.LoadASCIIFromFile(&model, &err, &warn, path)` for `.gltf` or
-   `loader.LoadBinaryFromFile(...)` for `.glb`. Print `warn` and `err`.
-3. Geometry. For each `model.meshes[m].primitives[p]`:
-   - `primitive.attributes` maps `"POSITION"`, `"NORMAL"`, `"TEXCOORD_0"` to an accessor index.
-   - `accessor = model.accessors[index]`, `view = model.bufferViews[accessor.bufferView]`,
-     `buffer = model.buffers[view.buffer]`.
-   - First byte: `buffer.data.data() + view.byteOffset + accessor.byteOffset`.
-     Step between elements: `accessor.ByteStride(view)`. Number of elements: `accessor.count`.
-   - Indices: `primitive.indices` is another accessor. Its `componentType` can be unsigned byte
-     (5121), unsigned short (5123) or unsigned int (5125). Convert all to 32-bit.
-4. Position in the scene: walk `model.scenes[model.defaultScene].nodes` and their children.
-   A node has either `matrix` (16 numbers) or `translation`, `rotation`, `scale`. Multiply parent
-   by child and store the result as the mesh's model matrix.
-5. Material. `model.materials[primitive.material].pbrMetallicRoughness` has `baseColorFactor`,
-   `baseColorTexture.index`, `metallicFactor`, `roughnessFactor`,
-   `metallicRoughnessTexture.index`. A texture index leads to
-   `model.textures[i].source`, then `model.images[source]` with `width`, `height`, `component`
-   and the pixel bytes in `image`.
+1. Getting Assimp. In CMake, `FetchContent_Declare(assimp ...)` at tag `v6.0.5`, added to the
+   same `FetchContent_MakeAvailable` as the other libraries, and the viewer links
+   `assimp::assimp`. Before that, a few `set(... CACHE BOOL "" FORCE)` lines keep the build small:
+   `BUILD_SHARED_LIBS OFF` (static library, no DLL to copy),
+   `ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF` with `ASSIMP_BUILD_GLTF_IMPORTER`,
+   `ASSIMP_BUILD_OBJ_IMPORTER` and `ASSIMP_BUILD_FBX_IMPORTER` ON, `ASSIMP_NO_EXPORT ON`, and
+   `ASSIMP_BUILD_TESTS`, `ASSIMP_BUILD_ASSIMP_TOOLS`, `ASSIMP_BUILD_SAMPLES`, `ASSIMP_INSTALL` and
+   `ASSIMP_WARNINGS_AS_ERRORS` OFF. `ASSIMP_BUILD_ZLIB ON` makes Assimp build its own copy of
+   zlib (it needs it for things like compressed data in FBX files), so Mac and Linux don't need
+   zlib installed; Windows does this anyway.
+   Configure prints "Enabled importer formats: OBJ FBX GLTF".
+   stb_image is one header in `third_party/stb`. Its code is compiled in exactly one `.cpp`
+   (`texture.cpp`), which has `#define STB_IMAGE_IMPLEMENTATION` before `#include <stb_image.h>`.
+   Assimp has its own renamed copy of stb inside, so the two don't clash.
+2. Reading the file: `Assimp::Importer importer;` then
+   `const aiScene* scene = importer.ReadFile(path, steps);` with these steps:
+   - `aiProcess_Triangulate`: polygons become triangles.
+   - `aiProcess_GenSmoothNormals`: makes normals if the file has none.
+   - `aiProcess_JoinIdenticalVertices`: shares vertices, so the index buffer is actually used.
+   - `aiProcess_CalcTangentSpace`: tangents from the texture coordinates.
+   - `aiProcess_PreTransformVertices`: applies the node transforms to the vertex positions, so
+     every mesh already sits where the file puts it and one model matrix draws them all.
+   - `aiProcess_FlipUVs`: this one is easy to get wrong. Assimp's glTF importer turns V around
+     (`v = 1 - v`) so that V counts from the bottom, like most other formats. FlipUVs turns it
+     back, so we get glTF's own UVs, which count from the top of the image.
+
+   The scene is owned by the importer and freed with it, so copy what you need before the
+   importer goes away.
+3. Error checks. `ReadFile` returns `nullptr` when the file is missing or broken, and
+   `importer.GetErrorString()` says why (for example "Unable to open file ..."). Also treat a
+   scene with `AI_SCENE_FLAGS_INCOMPLETE` in `scene->mFlags` or without `mRootNode` as a failure.
+   Assimp doesn't always fill in the error text, so fall back to a short message of your own.
+   We print the message, show it in the panel and keep drawing the sphere.
+4. Geometry. For each `scene->mMeshes[i]`:
+   - `mVertices`, `mNormals`, `mTextureCoords[0]` and `mTextureCoords[1]` (the first two UV
+     sets), `mTangents` and `mBitangents`, all `mNumVertices` long. Check `HasNormals()`,
+     `HasTextureCoords(0)`, `HasTextureCoords(1)` and `HasTangentsAndBitangents()` first.
+   - `mFaces[f].mIndices`, three per face after Triangulate. Faces with fewer corners are points
+     or lines, so we skip them, and a mesh with no triangles at all is left out.
+   - `mMaterialIndex` says which `scene->mMaterials[...]` the mesh uses.
+   - Our vertex has 14 floats: position, normal, UV, a tangent as `vec4`, and the second UV
+     (attributes 0 to 4). The tangent's fourth number is +1 or -1 and says on which side the
+     bitangent is, the way glTF stores tangents: `dot(cross(normal, tangent), bitangent) < 0 ? -1 : 1`.
+   - glTF lets each texture pick a UV set. The viewer keeps sets 0 and 1; a texture that asks
+     for a higher set prints a warning and uses set 0. When a mesh has only one set, copy it into
+     the second one, so the shader can always read both. The sphere does the same.
+   - While copying positions, grow a box (`boundsMin`, `boundsMax`) around all meshes. It's
+     used for fitting in step 8.
+5. Material. Read the values with `material->Get(key, value)`, which returns `AI_SUCCESS` when
+   the key is there:
+   - `AI_MATKEY_BASE_COLOR` (an `aiColor4D`), else `AI_MATKEY_COLOR_DIFFUSE` for OBJ and FBX.
+   - `AI_MATKEY_METALLIC_FACTOR`, `AI_MATKEY_ROUGHNESS_FACTOR`. OBJ and FBX files often don't have
+     them, so start from metallic 0 and roughness 0.5 (a plain non-metal).
+   - Also loaded for later: `AI_MATKEY_COLOR_EMISSIVE`, `AI_MATKEY_GLTF_ALPHAMODE`,
+     `AI_MATKEY_GLTF_ALPHACUTOFF`, `AI_MATKEY_TWOSIDED`, the normal scale and occlusion strength
+     (`AI_MATKEY_GLTF_TEXTURE_SCALE` and `AI_MATKEY_GLTF_TEXTURE_STRENGTH`, from
+     `<assimp/GltfMaterial.h>`).
+
+   Textures come from `material->GetTexture(type, 0, &name)`. The types for glTF are
+   `aiTextureType_BASE_COLOR` (fall back to `aiTextureType_DIFFUSE` for other formats),
+   `aiTextureType_GLTF_METALLIC_ROUGHNESS`, `aiTextureType_NORMALS`,
+   `aiTextureType_LIGHTMAP` (Assimp files glTF's occlusion texture under "lightmap") and
+   `aiTextureType_EMISSIVE`. The name is either a file next to the model, or `"*0"`, `"*1"` and so
+   on for images inside the file (as in `.glb`). For those, `scene->GetEmbeddedTexture(name)` gives
+   an `aiTexture`: when `mHeight == 0` it's a compressed PNG or JPEG of `mWidth` bytes in `pcData`
+   for `stbi_load_from_memory`; otherwise it's plain pixels in blue, green, red, alpha order.
+   Any other name is a file path. In glTF files it is written like a web address, so first turn
+   escapes such as `%23` back into the character (`#`); OBJ and FBX names are used as they are.
+   Join it to the model's folder with `std::filesystem::path`
+   (`folder / name`), but use it as it is when it already starts at a drive or the top folder
+   (`has_root_path()`), as some OBJ and FBX files have.
+
+   Each texture also says how to read it. We keep these in a `MaterialTexture` (id, UV set and
+   `TextureSettings`):
+   - `AI_MATKEY_UVWSRC(type, 0)`: which UV set (glTF's `texCoord`). We keep 0 and 1, anything
+     higher falls back to 0.
+   - `AI_MATKEY_MAPPINGMODE_U(type, 0)` and `_V`: wrap along U and V. Assimp gives
+     `aiTextureMapMode_Wrap`, `_Clamp` or `_Mirror`, which become `GL_REPEAT`,
+     `GL_CLAMP_TO_EDGE` and `GL_MIRRORED_REPEAT` (`_Decal`, from other formats, is treated as
+     clamp).
+   - `AI_MATKEY_GLTF_MAPPINGFILTER_MAG(type, 0)` and `_MIN` (from `<assimp/GltfMaterial.h>`): the
+     filters. glTF stores them as the OpenGL numbers (9728 is `GL_NEAREST`, 9729 `GL_LINEAR` and
+     so on), so they can be used as they are. They are only there when the file sets them;
+     otherwise keep `GL_LINEAR_MIPMAP_LINEAR` and `GL_LINEAR`.
+
+   Keep a map from name plus these settings to texture id, so an image used several times the
+   same way loads once. In OpenGL 4.1 the wrap and filter live in the texture itself, so the
+   same image with other settings becomes a second texture. If the base color or
+   metallic-roughness texture has a texture transform (`AI_MATKEY_UVTRANSFORM`, from the
+   KHR_texture_transform extension), we print a warning, because the viewer doesn't apply it yet.
+
+   One surprise: the glTF importer adds one default material after the materials it imported
+   (it only imports the ones the meshes use). A mesh whose glTF primitive has no material uses
+   it, so it gets glTF's default values (white, metallic 1, roughness 1).
 6. Upload in `texture`:
-   - Base color: internal format `GL_SRGB8_ALPHA8`. Metallic-roughness: `GL_RGBA8`.
-   - `glTexImage2D`, `glGenerateMipmap(GL_TEXTURE_2D)`, min filter `GL_LINEAR_MIPMAP_LINEAR`,
-     wrap `GL_REPEAT`.
-   - Do not flip glTF images. Their first row is the top, and glTF UVs count from the top too,
-     so the two cancel out.
-   - A material with no texture gets a 1 x 1 white texture, so the shader has one code path.
-7. Shader, in `common.glsl`:
-   - `base = texture(uBaseColorTex, uv).rgb * uBaseColorFactor.rgb`
-   - `roughness = texture(uMetalRoughTex, uv).g * uRoughnessFactor`
-   - `metallic = texture(uMetalRoughTex, uv).b * uMetallicFactor`
-8. Fit the model on screen: read the position accessor's `minValues` and `maxValues`, then center
-   and scale.
+   - `stbi_load(path, &w, &h, &channels, 4)` (4 asks for RGBA every time), then `glTexImage2D` with
+     internal format `GL_RGBA8`, `glGenerateMipmap(GL_TEXTURE_2D)`, the min and mag filter and
+     the wrap S and T from the texture's settings (`glTexParameteri`), and `stbi_image_free`.
+   - For now every texture is `GL_RGBA8`, base color too, so the colors are not converted yet.
+     Base color switches to an sRGB format in "HDR and color space", together with the output
+     conversion.
+   - Don't flip the images. Their first row is the top, and with FlipUVs the UVs count from the
+     top too, so the two match.
+   - A missing texture gets a shared 1 x 1 white texture, so texture times factor is just the
+     factor and the shader has one code path. The normal map is the exception: it stays 0,
+     because white would tilt the normals.
+7. Shader. `mesh.vert` passes both UV sets on as `texCoord` and `texCoord1`. In
+   `hybrid_main.glsl` (samplers and uniforms declared in `common.glsl`, base color on texture
+   unit 0 and metallic-roughness on unit 1), each texture picks its set with a small uniform,
+   `uBaseColorUVSet` and `uMetallicRoughnessUVSet`, set per part from the material:
+   - `baseColorUV = (uBaseColorUVSet == 1) ? texCoord1 : texCoord`, same for metallic-roughness
+   - `baseColor = texture(uBaseColorTexture, baseColorUV).rgb * uBaseColor`
+   - `roughness = texture(uMetallicRoughnessTexture, metallicRoughnessUV).g * uRoughness`
+   - `metallic = texture(uMetallicRoughnessTexture, metallicRoughnessUV).b * uMetallic`
+8. Fit the model on screen (`fitModelMatrix` in `renderer.cpp`): from the box, scale by
+   `2 / largest side`, move the middle of the box's bottom to the origin and put it on the grid
+   floor. The scale is the same on every axis, so the normals keep their directions. The sphere
+   is drawn as a one-part model with white textures and the panel's material values.
+
+Good to know: Assimp 6.0.5 has two small gaps with glTF files that we decided to live with.
+Some compression tools store texture coordinates as packed whole numbers instead of decimals;
+Assimp doesn't unpack them, so such a model reads its textures from the wrong place. And a number
+written with a decimal point where glTF expects a whole number (a filter of `9728.0` instead of
+`9728`) is skipped, so the default is used. Most files don't do either, and a newer Assimp may
+fix them.
 
 ---
 

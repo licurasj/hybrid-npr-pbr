@@ -41,7 +41,29 @@ FetchContent_Declare(imgui
   GIT_TAG v1.93.0
   GIT_SHALLOW TRUE)
 
-FetchContent_MakeAvailable(glfw glm imgui)
+# Assimp reads the model files (glTF, OBJ and FBX)
+# We build it as a static library with only the three importers we use,
+# and without its exporters, tests, tools and install step, which keeps the build shorter.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_GLTF_IMPORTER ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "" FORCE)
+set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+# Assimp needs zlib, for example for compressed data in FBX files. Building its own copy
+# everywhere means Mac and Linux do not need zlib installed (Windows already does this by default).
+set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+FetchContent_Declare(assimp
+  GIT_REPOSITORY https://github.com/assimp/assimp.git
+  GIT_TAG v6.0.5
+  GIT_SHALLOW TRUE)
+
+FetchContent_MakeAvailable(glfw glm imgui assimp)
 
 
 # Dear ImGui has no build file of its own
@@ -68,11 +90,19 @@ add_executable(viewer
   src/camera.cpp
   src/main.cpp
   src/mesh.cpp
+  src/model.cpp
   src/renderer.cpp
   src/shader.cpp
+  src/texture.cpp
   src/ui.cpp)
-target_link_libraries(viewer PRIVATE glad glfw glm::glm imgui)
+target_link_libraries(viewer PRIVATE glad glfw glm::glm imgui assimp::assimp)
+
+# stb_image reads the texture images. It is a single header file kept in third_party.
+target_include_directories(viewer PRIVATE third_party/stb)
 
 # The program reads the shaders straight from the source folder
 # so it works from any folder and the R key reloads the files we edit.
 target_compile_definitions(viewer PRIVATE SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders/")
+
+# The model menu lists the files in assets/models of the source folder
+target_compile_definitions(viewer PRIVATE ASSET_DIR="${CMAKE_SOURCE_DIR}/assets/")

@@ -32,8 +32,9 @@ const int VIEW_MODES[7][3] = {
 
 
 // Uniforms that are the same in every strip
-static void setSharedUniforms(GLuint program, const Camera& camera, const Settings& settings) {
-  setUniform(program, "uModel", glm::mat4(1.0f));
+static void setSharedUniforms(GLuint program, const Model& model, const Camera& camera,
+                              const Settings& settings) {
+  setUniform(program, "uModel", fitModelMatrix(model));
   setUniform(program, "uView", cameraView(camera));
   setUniform(program, "uCameraPos", cameraPosition(camera));
 
@@ -41,13 +42,63 @@ static void setSharedUniforms(GLuint program, const Camera& camera, const Settin
   setUniform(program, "uLightDir", directionFromAngles(settings.lightYaw, settings.lightPitch));
   setUniform(program, "uLightRadiance", glm::vec3(settings.lightIntensity));
   setUniform(program, "uAmbientColor", settings.ambientColor);
-  setUniform(program, "uBaseColor", settings.baseColor);
-  setUniform(program, "uMetallic", settings.metallic);
-  setUniform(program, "uRoughness", settings.roughness);
   setUniform(program, "uShininess", settings.shininess);
+
+  // Each texture in the shader reads from its own texture unit
+  setUniform(program, "uBaseColorTexture", 0);
+  setUniform(program, "uMetallicRoughnessTexture", 1);
 
   // Every strip shows the same debug view
   setUniform(program, "uDebugView", settings.debugView);
+}
+
+
+// Model matrix that puts the model in the middle of the grid at the size of the sphere
+glm::mat4 fitModelMatrix(const Model& model) {
+  glm::vec3 size = model.boundsMax - model.boundsMin;
+  float largest = glm::max(size.x, glm::max(size.y, size.z));
+
+  // A model that is a single point cannot be scaled to fit, so it keeps its size
+  float scale = 1.0f;
+  if (largest > 0.0f) {
+    scale = 2.0f / largest;
+  }
+
+  // Read from right to left: move the middle of the bottom of the box to the origin,
+  // scale it, then lift or lower it onto the floor.
+  // The scale is the same along every axis, so the normals keep their directions.
+  glm::vec3 center = (model.boundsMin + model.boundsMax) * 0.5f;
+  glm::vec3 bottomCenter(center.x, model.boundsMin.y, center.z);
+  glm::mat4 matrix(1.0f);
+  matrix = glm::translate(matrix, glm::vec3(0.0f, FLOOR_HEIGHT, 0.0f));
+  matrix = glm::scale(matrix, glm::vec3(scale));
+  matrix = glm::translate(matrix, -bottomCenter);
+  return matrix;
+}
+
+
+// Draw every mesh of the model with its own material
+static void drawModel(GLuint program, const Model& model) {
+  for (const ModelPart& part : model.parts) {
+    const Material& material = part.material;
+    setUniform(program, "uBaseColor", glm::vec3(material.baseColorFactor));
+    setUniform(program, "uMetallic", material.metallicFactor);
+    setUniform(program, "uRoughness", material.roughnessFactor);
+
+    // Each texture says which set of texture coordinates it uses
+    setUniform(program, "uBaseColorUVSet", material.baseColorTexture.uvSet);
+    setUniform(program, "uMetallicRoughnessUVSet", material.metallicRoughnessTexture.uvSet);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, material.baseColorTexture.id);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, material.metallicRoughnessTexture.id);
+
+    drawMesh(part.mesh);
+  }
+
+  // Leave unit 0 active, which is what the panel code expects
+  glActiveTexture(GL_TEXTURE0);
 }
 
 
@@ -100,7 +151,7 @@ static void drawAxisIndicator(GLuint lineProgram, const LineMesh& axes, const Ca
   glm::mat4 projection = glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f);
   setUniform(lineProgram, "uMVP", projection * rotation);
 
-  // No depth test here so the sphere and the grid never hide the axes
+  // No depth test here so the model and the grid never hide the axes
   // Afterwards the depth test is put back the way it was.
   GLboolean depthWasOn = glIsEnabled(GL_DEPTH_TEST);
   glDisable(GL_DEPTH_TEST);
@@ -134,7 +185,7 @@ static void drawAxisIndicator(GLuint lineProgram, const LineMesh& axes, const Ca
 
 
 // Draw the scene once per strip of the current view mode
-void drawScene(GLuint program, GLuint lineProgram, const Mesh& mesh, const LineMesh& grid,
+void drawScene(GLuint program, GLuint lineProgram, const Model& model, const LineMesh& grid,
                const LineMesh& axes, const Camera& camera, const Settings& settings,
                int sceneWidth, int sceneHeight) {
   const int* views = VIEW_MODES[settings.viewMode];
@@ -146,7 +197,7 @@ void drawScene(GLuint program, GLuint lineProgram, const Mesh& mesh, const LineM
   }
 
   glUseProgram(program);
-  setSharedUniforms(program, camera, settings);
+  setSharedUniforms(program, model, camera, settings);
 
   // The scissor test keeps each strip from drawing into its neighbours
   glEnable(GL_SCISSOR_TEST);
@@ -164,16 +215,16 @@ void drawScene(GLuint program, GLuint lineProgram, const Mesh& mesh, const LineM
     glViewport(left, 0, stripWidth, sceneHeight);
     glScissor(left, 0, stripWidth, sceneHeight);
 
-    // Each strip has its own width to height ratio so the sphere stays round
+    // Each strip has its own width to height ratio so the model is not stretched
     float aspect = (float)stripWidth / (float)sceneHeight;
     glm::mat4 projection = cameraProjection(aspect);
     glUseProgram(program);
     setUniform(program, "uProjection", projection);
 
     setViewWeights(program, views[i], settings);
-    drawMesh(mesh);
+    drawModel(program, model);
 
-    // The grid is drawn after the sphere with the depth test on, so the sphere hides it.
+    // The grid is drawn after the model with the depth test on, so the model hides it.
     // It has its own shader, so the blend weights and the debug view do not change it.
     glUseProgram(lineProgram);
     if (settings.showGrid) {
