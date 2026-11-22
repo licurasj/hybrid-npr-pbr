@@ -10,7 +10,7 @@ pure NPR and hybrid versions of the same model side by side under a light you ca
 Final project for CSCI 420 Computer Graphics at the University of Southern California, Fall 2026.
 
 > **Status: early development.** The window, the control panel, an orbit camera and a test sphere
-> work. The sphere already uses the hybrid shader with its four blend sliders and is shown as
+> work. The sphere already uses the hybrid shader with its blend sliders and is shown as
 > PBR, Hybrid and NPR side by side, but each lighting term is still a simple placeholder
 > formula: the real PBR and NPR shading described below is not written yet. The build steps have
 > been checked on Windows; macOS and Linux are not tested yet.
@@ -110,11 +110,13 @@ with OpenGL 4.1" means the driver does not offer OpenGL 4.1; updating it usually
 | `Esc` | Quit |
 
 The control panel on the right shows the frame rate and OpenGL version, Reset camera and Reset light
-buttons, the light direction, intensity and ambient color, the base color, metallic, roughness and
-shininess, and the four blend sliders (Shadow, Diffuse, Specular, Ambient). A blend slider at 0 uses
+buttons, the light direction, intensity and ambient color, exposure and the tone curve with two
+ticks (see Tone mapping below), the base color, metallic, roughness and shininess, and the blend
+sliders (Shadow, Diffuse, Specular, Ambient, Tone mapping). A blend slider at 0 uses
 the physical version of that term and at 1 the stylized version; values in between mix the two. The
 small PBR and NPR labels above the sliders mark these two ends, and hovering a slider says the same.
 Each slider has a small number box next to it where you can type a value and press Enter.
+The fifth blend slider, Tone mapping, works the same way for the screen step described below.
 For now the terms are placeholders, for example the stylized diffuse is just two flat bands. The
 Shadow slider has no visible effect yet, because there are no shadows until the shadow map is added.
 The window opens maximized.
@@ -164,8 +166,31 @@ program joins them in that order. If a file has an error, `R` keeps the old pict
 shows the file name and line.
 
 Planned: middle mouse drag to pan, `1` `2` `3` `4` as shortcuts for the view modes, and `Tab` to
-show or hide the panel. The panel will get exposure and tone
-mapping and the ramp.
+show or hide the panel. The panel will also get the ramp.
+
+### Tone mapping
+
+The lighting can get brighter than a screen can show, so the picture goes through one last step
+before it reaches the window. The Tone mapping section of the panel has the Exposure slider (it
+scales the brightness, 1 leaves it as it is) and the Tone curve menu: Off just cuts everything
+above 1 off, while Reinhard and ACES fit (a film-like curve) squeeze bright values back into range.
+The background, the grid and the axes skip exposure and the curve, so they look the same whatever
+you pick here. The base color and ambient color you pick in the panel are read as normal screen
+colors, the same way color textures are, and turned into light values before the shading.
+
+The PBR view always gets exposure and the curve (in a debug view only while the debug tick below
+is on). The NPR uses tone mapping tick decides whether the NPR view gets them too; untick it to see
+the NPR colors exactly as computed (only cut off at 1). The Hybrid view sits in between: the Tone
+mapping slider in the Blend section shows the Hybrid view the way PBR is shown at 0 and the way NPR
+is shown at 1. It only changes how the Hybrid view is shown, not its shading. While the tick is
+on, both ends are the same, so that slider changes nothing.
+
+The Exposure and tone curve on debug view tick decides whether a debug view gets this step too. It
+sets itself each time you pick a debug view: off for base color, metallic, roughness, normal and
+shadow, on for the diffuse, specular and ambient terms (which are light and can go above 1). You
+can change it afterwards. Metallic, roughness, normal and shadow are numbers rather than colors, so
+they are always shown as stored, without the sRGB step. The Default view always
+gets the full step, so the tick is grayed out there.
 
 ## Documentation
 

@@ -104,6 +104,14 @@ static const char* const DEBUG_VIEW_NAMES[] = {
 };
 
 
+// Whether a debug view gets exposure and the tone curve when it is picked
+// Base color, metallic, roughness, normal and shadow are shown as they are stored,
+// while the diffuse, specular and ambient terms are light that can go above 1.
+static bool debugViewWantsToneMapping(int debugView) {
+  return debugView == 0 || debugView >= 6;
+}
+
+
 // Width of the number box next to each slider, wide enough for -180.0
 static float numberBoxWidth() {
   return ImGui::CalcTextSize("-180.0").x + ImGui::GetStyle().FramePadding.x * 2.0f;
@@ -205,8 +213,11 @@ void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>&
                  "PBR | Hybrid\0Hybrid | NPR\0PBR | NPR\0");
 
     // Shows one input or one lighting term on its own in every view
-    ImGui::Combo("Debug view", &settings.debugView, DEBUG_VIEW_NAMES,
-                 IM_ARRAYSIZE(DEBUG_VIEW_NAMES));
+    // A new debug view also sets the exposure and tone curve tick to what suits it.
+    if (ImGui::Combo("Debug view", &settings.debugView, DEBUG_VIEW_NAMES,
+                     IM_ARRAYSIZE(DEBUG_VIEW_NAMES))) {
+      settings.debugViewToneMapping = debugViewWantsToneMapping(settings.debugView);
+    }
 
     // Floor grid under the model and the small axes in the corner of each view
     ImGui::Checkbox("Show grid", &settings.showGrid);
@@ -256,6 +267,25 @@ void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>&
     }
   }
 
+  // The lighting can be brighter than the screen can show.
+  // Exposure scales the picture and the tone curve squeezes it back into the screen range.
+  // Off just cuts off everything above 1.
+  if (ImGui::CollapsingHeader("Tone mapping", ImGuiTreeNodeFlags_DefaultOpen)) {
+    sliderWithBox("Exposure", &settings.exposure, 0.0f, 4.0f, "%.2f");
+    ImGui::Combo("Tone curve", &settings.toneCurve, "Off\0Reinhard\0ACES fit\0");
+
+    // Off shows the NPR colors as they are computed, only cut off at 1
+    ImGui::Checkbox("NPR uses tone mapping", &settings.toonUsesToneMapping);
+    ImGui::SetItemTooltip("Give the NPR view exposure and the tone curve too");
+
+    // The normal picture always gets exposure and the curve, so the tick is only for debug views
+    ImGui::BeginDisabled(settings.debugView == 0);
+    ImGui::Checkbox("Exposure and tone curve on debug view", &settings.debugViewToneMapping);
+    ImGui::SetItemTooltip("Data views (metallic, roughness, normal, shadow) get exposure and the curve\n"
+                          "but no sRGB step, so their numbers stay as stored");
+    ImGui::EndDisabled();
+  }
+
   if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
     // A model file brings its own base color, metallic and roughness
     if (settings.modelChoice != 0) {
@@ -284,6 +314,10 @@ void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>&
     sliderWithBox("Diffuse", &settings.weights[1], 0.0f, 1.0f, "%.2f", blendTip);
     sliderWithBox("Specular", &settings.weights[2], 0.0f, 1.0f, "%.2f", blendTip);
     sliderWithBox("Ambient", &settings.weights[3], 0.0f, 1.0f, "%.2f", blendTip);
+
+    // Exposure and the tone curve of the Hybrid view, between how PBR and NPR get them
+    // When NPR uses tone mapping is ticked, both ends are the same and this slider changes nothing.
+    sliderWithBox("Tone mapping", &settings.toneMappingWeight, 0.0f, 1.0f, "%.2f", blendTip);
   }
 
   ImGui::PopItemWidth();

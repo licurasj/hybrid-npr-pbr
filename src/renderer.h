@@ -27,3 +27,13 @@ glm::mat4 fitModelMatrix(const Model& model);
 void drawScene(GLuint program, GLuint lineProgram, const Model& model, const LineMesh& grid,
                const LineMesh& axes, const Camera& camera, const Settings& settings,
                int sceneWidth, int sceneHeight);
+
+// Draw the HDR picture onto the window with exposure, the tone curve and the sRGB step
+// hdrImage is the multisample HDR color texture and sampleCount its number of samples per pixel.
+// The full-screen triangle has no vertex buffer, but
+// OpenGL still needs a vertex array bound to draw, so an empty one is passed in.
+// Each strip is drawn on its own, because PBR, Hybrid and NPR can get different amounts of
+// exposure and curve. sceneWidth is the same width drawScene was given.
+// Draws into whatever framebuffer is bound, which should be the window (framebuffer 0).
+void drawToneMap(GLuint toneMapProgram, GLuint hdrImage, int sampleCount, GLuint emptyVertexArray,
+                 const Settings& settings, int sceneWidth, int width, int height);

@@ -5,6 +5,8 @@
 
 #include <vector>
 
+#include "color.h"
+
 
 // Make a unit sphere with the given number of rows and columns
 // Rows go from the top pole to the bottom pole and columns go around the middle.
@@ -142,9 +144,10 @@ static LineMesh uploadLines(const std::vector<float>& vertices) {
 // The line along X through the origin is reddish and the one along Z is bluish,
 // muted so they do not stand out more than the sphere.
 LineMesh createGrid(int size, float height) {
-  glm::vec3 gray(0.30f, 0.30f, 0.30f);
-  glm::vec3 xColor(0.55f, 0.27f, 0.27f);
-  glm::vec3 zColor(0.27f, 0.36f, 0.58f);
+  // The colors are picked by eye, so they are turned into linear values like every color the shaders use
+  glm::vec3 gray = srgbToLinear(glm::vec3(0.30f, 0.30f, 0.30f));
+  glm::vec3 xColor = srgbToLinear(glm::vec3(0.55f, 0.27f, 0.27f));
+  glm::vec3 zColor = srgbToLinear(glm::vec3(0.27f, 0.36f, 0.58f));
   float half = size / 2.0f;
 
   std::vector<float> vertices;
@@ -175,9 +178,10 @@ void deleteMesh(Mesh& mesh) {
 LineMesh createAxes(float length) {
   std::vector<float> vertices;
   glm::vec3 origin(0.0f);
-  addLine(vertices, origin, glm::vec3(length, 0.0f, 0.0f), glm::vec3(0.90f, 0.30f, 0.30f));
-  addLine(vertices, origin, glm::vec3(0.0f, length, 0.0f), glm::vec3(0.40f, 0.80f, 0.30f));
-  addLine(vertices, origin, glm::vec3(0.0f, 0.0f, length), glm::vec3(0.30f, 0.50f, 1.00f));
+  // Colors picked by eye, turned into linear values like the grid colors
+  addLine(vertices, origin, glm::vec3(length, 0.0f, 0.0f), srgbToLinear(glm::vec3(0.90f, 0.30f, 0.30f)));
+  addLine(vertices, origin, glm::vec3(0.0f, length, 0.0f), srgbToLinear(glm::vec3(0.40f, 0.80f, 0.30f)));
+  addLine(vertices, origin, glm::vec3(0.0f, 0.0f, length), srgbToLinear(glm::vec3(0.30f, 0.50f, 1.00f)));
   return uploadLines(vertices);
 }
 

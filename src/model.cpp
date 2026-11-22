@@ -93,8 +93,9 @@ static TextureSettings readTextureSettings(const aiMaterial* material, aiTexture
 
 // Load the first texture of one type from a material
 // The id is 0 if the material has no texture of that type or the image could not be read.
+// srgb is true for textures that hold colors, see TextureSettings.
 static MaterialTexture loadMaterialTexture(TextureLoader& loader, Model& model, const aiMaterial* material,
-                                           aiTextureType type) {
+                                           aiTextureType type, bool srgb) {
   MaterialTexture result;
   aiString name;
   if (material->GetTexture(type, 0, &name) != AI_SUCCESS) {
@@ -112,13 +113,15 @@ static MaterialTexture loadMaterialTexture(TextureLoader& loader, Model& model, 
     result.uvSet = 0;
   }
   result.settings = readTextureSettings(material, type);
+  result.settings.srgb = srgb;
 
   // The same image with other settings is a separate texture, because OpenGL keeps
-  // the settings in the texture itself
+  // the settings and the format in the texture itself
   std::string imageName = name.C_Str();
   std::string key = imageName + " " + std::to_string(result.settings.wrapS) + " " +
                     std::to_string(result.settings.wrapT) + " " + std::to_string(result.settings.minFilter) +
-                    " " + std::to_string(result.settings.magFilter);
+                    " " + std::to_string(result.settings.magFilter) + " " +
+                    (result.settings.srgb ? "srgb" : "plain");
   if (loader.loaded.count(key) > 0) {
     result.id = loader.loaded[key];
     return result;
@@ -184,8 +187,9 @@ static void warnAboutTexture(const aiMaterial* material, aiTextureType type, con
 // numbers (10497 repeat, 33071 clamp to edge, 33648 mirrored repeat, 9728 nearest, 9729 linear)
 static void printTexture(const char* what, const MaterialTexture& t) {
   if (t.id != 0) {
-    std::printf("    %s texture: coordinates %d, wrap %d %d, filter %d %d\n", what, t.uvSet, t.settings.wrapS,
-                t.settings.wrapT, t.settings.minFilter, t.settings.magFilter);
+    std::printf("    %s texture: coordinates %d, wrap %d %d, filter %d %d, %s\n", what, t.uvSet,
+                t.settings.wrapS, t.settings.wrapT, t.settings.minFilter, t.settings.magFilter,
+                t.settings.srgb ? "sRGB" : "plain");
   }
 }
 
@@ -254,18 +258,19 @@ static Material readMaterial(TextureLoader& loader, Model& model, const aiMateri
 
   // Textures. Assimp files the glTF occlusion texture under "lightmap".
   aiTextureType baseColorType = aiTextureType_BASE_COLOR;
-  material.baseColorTexture = loadMaterialTexture(loader, model, source, baseColorType);
+  // Base color and emissive hold colors (sRGB), the others hold data
+  material.baseColorTexture = loadMaterialTexture(loader, model, source, baseColorType, true);
   if (material.baseColorTexture.id == 0) {
     baseColorType = aiTextureType_DIFFUSE;
-    material.baseColorTexture = loadMaterialTexture(loader, model, source, baseColorType);
+    material.baseColorTexture = loadMaterialTexture(loader, model, source, baseColorType, true);
   }
   material.metallicRoughnessTexture =
-      loadMaterialTexture(loader, model, source, aiTextureType_GLTF_METALLIC_ROUGHNESS);
+      loadMaterialTexture(loader, model, source, aiTextureType_GLTF_METALLIC_ROUGHNESS, false);
   warnAboutTexture(source, baseColorType, "base color");
   warnAboutTexture(source, aiTextureType_GLTF_METALLIC_ROUGHNESS, "metallic-roughness");
-  material.normalTexture = loadMaterialTexture(loader, model, source, aiTextureType_NORMALS);
-  material.occlusionTexture = loadMaterialTexture(loader, model, source, aiTextureType_LIGHTMAP);
-  material.emissiveTexture = loadMaterialTexture(loader, model, source, aiTextureType_EMISSIVE);
+  material.normalTexture = loadMaterialTexture(loader, model, source, aiTextureType_NORMALS, false);
+  material.occlusionTexture = loadMaterialTexture(loader, model, source, aiTextureType_LIGHTMAP, false);
+  material.emissiveTexture = loadMaterialTexture(loader, model, source, aiTextureType_EMISSIVE, true);
 
   // Print what was found before the missing textures are replaced by white
   std::printf("  Material \"%s\": base color (%.2f %.2f %.2f %.2f), metallic %.2f, roughness %.2f\n",

@@ -22,14 +22,15 @@ material class hierarchy.
 | Module | Responsible for | Hands on |
 |---|---|---|
 | `main.cpp` | Creates the window, loads everything once, runs the frame loop | Calls the modules below in order |
-| `settings.h` | One plain struct with every value the UI can change: blend weights, light direction, exposure, ramp choice, view mode, debug view | Read by the renderer, written by the UI |
+| `settings.h` | One plain struct with every value the UI can change: blend weights (four terms plus tone mapping), light direction, exposure, tone curve and the two tone mapping ticks, ramp choice, view mode, debug view | Read by the renderer, written by the UI |
 | `camera` | Orbit camera: turns mouse input into a view matrix and a projection matrix | Two matrices to the renderer |
 | `shader` | Reads GLSL files, joins them, compiles, links, reports errors, sets uniforms, reloads on request | A program id |
 | `texture` | Loads images with stb_image and creates GPU textures with the right color space. Builds the environment cubemap | Texture ids |
 | `mesh` | Holds one vertex array (positions, normals, UVs) and draws it. Can generate a sphere | A drawable mesh |
 | `model` | Reads a model file with Assimp (glTF first, but OBJ and FBX work too) and turns it into meshes and materials | A list of mesh and material pairs |
 | `material.h` | A plain struct: the texture ids and constant factors for one material | Bound by the renderer before drawing |
-| `framebuffer` | Creates the two off-screen targets: the shadow depth map and the HDR color target | Framebuffer and texture ids |
+| `color` | One small helper, `srgbToLinear`, for colors picked by eye (background, grid, axes, panel colors) | Linear colors |
+| `framebuffer` | Creates the off-screen targets: the HDR target (a 4x multisample float color texture and a multisampled depth buffer) and later the shadow depth map | Framebuffer and texture ids |
 | `renderer` | Runs the three passes for one frame | The final image on screen |
 | `ui` | Draws the ImGui control panel | Changes to `Settings` |
 
@@ -45,6 +46,7 @@ flowchart TD
   material[material.h<br/>texture ids and factors]
   shader[shader<br/>compile, link, uniforms]
   framebuffer[framebuffer<br/>shadow map, HDR target]
+  color[color<br/>sRGB helper]
   renderer[renderer<br/>shadow, lighting, tone map]
 
   main --> ui
@@ -62,6 +64,7 @@ flowchart TD
   material --> renderer
   shader --> renderer
   framebuffer --> renderer
+  color --> renderer
 ```
 
 The shaders live in `shaders/` as separate files:
@@ -96,9 +99,9 @@ us can each work in our own file.
 | Pass | Draws | Reads | Writes into |
 |---|---|---|---|
 | 1. Shadow | The model, seen from the light, depth only | Vertex positions, light matrix | Shadow map: a 2048 x 2048 depth texture |
-| 2. Lighting | The model with the hybrid shader, once per view. Then the skybox | Material textures, shadow map, environment cubemap, ramp texture, camera and light uniforms, blend weights | HDR target: a 16-bit float color texture the size of the window, plus a depth buffer |
+| 2. Lighting | The model with the hybrid shader, once per view, then the grid and axes. Later the skybox | Material textures, shadow map, environment cubemap, ramp texture, camera and light uniforms, blend weights | HDR target: 16-bit float color and depth the size of the window, 4 samples per pixel. Alpha marks scene pixels (model 1, everything else 0) |
 | 2b. Outline (optional) | The model again, slightly enlarged, back faces only, in a flat color | Vertex positions and normals | The same HDR target |
-| 3. Tone mapping | One triangle that covers the screen | The HDR color texture, exposure | The window's own framebuffer |
+| 3. Tone mapping | One triangle that covers the screen, drawn once per view and once more for the area under the panel. Each sample of a pixel gets its own treatment, then they are averaged | Every sample of the HDR target, exposure, tone curve, tone amount of each view | The window's own framebuffer |
 | 4. UI | The ImGui panel | ImGui draw data | The window's own framebuffer |
 
 ```mermaid
@@ -114,8 +117,8 @@ flowchart LR
     smap[(Shadow map<br/>depth texture)]
     lighting[Pass 2: lighting<br/>hybrid shader, once per view]
     outline[Pass 2b: outline<br/>optional]
-    hdr[(HDR target<br/>float color texture)]
-    tonemap[Pass 3: tone mapping<br/>exposure, tone curve, sRGB]
+    hdr[(HDR target<br/>float color, 4 samples)]
+    tonemap[Pass 3: tone mapping<br/>each sample: exposure, tone curve, sRGB<br/>then average, once per view]
     screen[(Window)]
     imgui[Pass 4: UI panel]
   end
@@ -125,7 +128,8 @@ flowchart LR
   input --> lightmat --> shadow
   shadow --> smap --> lighting
   textures --> lighting
-  panel -->|weights, exposure| lighting
+  panel -->|weights| lighting
+  panel -->|exposure, curve, tone amount| tonemap
   lighting --> hdr
   outline --> hdr
   hdr --> tonemap --> screen
@@ -140,18 +144,38 @@ all 0 for PBR, the slider values for the hybrid, all 1 for NPR. The shadow pass 
 shared. Drawing the scene three times is wasteful, but our scenes are one model, and it means the
 comparison needs no extra shader code.
 
+The tone mapping pass uses the same strips. It runs once per strip, cut to the strip with
+`glScissor`, and each strip gets its own tone amount: how much of exposure and the tone curve it
+gets. PBR always gets all of it (in a debug view only while the debug tick is on). NPR gets all of
+it while the "NPR uses tone mapping" tick is on (the start) and none when it is off, so its colors
+are shown as computed, only cut off at 1. The Hybrid view is set by a fifth blend slider, "Tone
+mapping": 0 shows the Hybrid strip the way PBR is shown, 1 the way NPR is shown. Both ends are
+the Hybrid strip's own shading, so the slider mixes two display treatments of it, not the PBR and
+NPR pictures. With the tick on, both ends are the same and the slider changes nothing. One more
+draw with amount 0 covers the area under the panel.
+
 ### Color space rule
 
 All lighting math happens in linear color. Three places enforce this, and nowhere else touches it:
 
-1. **Loading.** Base color and ramp textures are created with an sRGB format, so the GPU converts
-   them to linear when the shader reads them. Metallic, roughness and normal textures hold data,
-   not colors, and are created with a linear format. The environment map is a float texture that is
-   already linear.
-2. **Lighting.** The HDR target stores linear values, including values above 1.
+1. **Loading.** Base color and emissive textures (later the ramp too) are created with an sRGB
+   format, so the GPU converts them to linear when the shader reads them. Metallic-roughness,
+   normal and occlusion textures hold data, not colors, and are created with a plain format. The
+   environment map will be a float texture that is already linear. Colors we pick by eye, the
+   background, grid and axis colors and the panel's base color and ambient color, are sRGB too:
+   `srgbToLinear` turns each into linear once before it is used.
+2. **Lighting.** The HDR target stores linear values, including values above 1. Its alpha channel
+   marks what is scene: the model writes 1, the background, grid and axes 0.
 3. **Tone mapping.** The last shader applies exposure, a tone curve that brings bright values into
-   the 0 to 1 range, and then the linear to sRGB conversion. `GL_FRAMEBUFFER_SRGB` stays off, so
-   the conversion happens exactly once and ImGui is drawn afterward untouched.
+   the 0 to 1 range, and then the linear to sRGB conversion. Pixels marked as not scene get only
+   the conversion, so the background, grid and axes look the same in every mode. `GL_FRAMEBUFFER_SRGB`
+   stays off, so the conversion happens exactly once and ImGui is drawn afterward untouched.
+
+Debug views follow the same idea. Base color is a color, so it gets the sRGB step. Metallic,
+roughness, normal and shadow are data and are shown as stored, never converted, so they match the
+Khronos glTF Sample Viewer. Whether a debug view also gets exposure and the curve is a panel tick
+that sets itself when the debug view changes: off for base color and the data views, on for the
+diffuse, specular and ambient terms, which are light.
 
 ## 4. Data flow for one material
 
@@ -179,9 +203,9 @@ Uniforms and bindings   Matrices: model, view, projection, light
 Passed to fragments     World position, world normal, UV, position in light space
         |
         v  hybrid shader, per pixel
-Linear HDR color        Written to the HDR target
+Linear HDR color        Written to the HDR target, several samples per pixel
         |
-        v  tonemap.frag
+        v  tonemap.frag, each sample treated, then averaged
 Final pixel             sRGB color in the window
 ```
 
@@ -250,6 +274,11 @@ the N.L factor. A white ramp gives the same brightness the physical side has whe
 faces the light directly, so the two sides stay in the same range and differences on screen come
 from the shading model, not from mismatched brightness.
 
+The display step is shared the same way: by default both sides get the same exposure and tone
+curve. Unticking "NPR uses tone mapping" takes them away from the NPR side, which is handy for
+seeing its colors as computed, but then part of the difference on screen comes from the display
+step and not from the shading.
+
 ## 6. Why it is arranged this way
 
 - **One forward lighting pass.** We have one light and one model. Deferred shading would add several
@@ -295,6 +324,12 @@ Kept simple on purpose:
 - **HDR, high dynamic range.** Storing colors as floats that can exceed 1, so bright highlights are
   not clipped during lighting.
 - **Tone mapping.** Squeezing HDR values into the 0 to 1 range a display can show.
+- **Exposure.** A brightness factor applied before the tone curve, like a camera setting.
+- **MSAA, multisampling.** Storing several samples per pixel (we use 4) so edges look smooth.
+- **Multisample texture.** A texture that keeps every sample of each pixel. A shader reads one
+  sample at a time with `texelFetch`. We use it instead of a *resolve*, the usual step that
+  averages the samples into a normal texture first, so the model and the background on an edge
+  can each get their own treatment before they are averaged.
 - **Framebuffer.** An off-screen image the GPU can draw into. Its textures can be read by a later
   pass.
 - **Shadow map.** A depth image drawn from the light. A pixel is in shadow if it is farther from the

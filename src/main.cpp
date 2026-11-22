@@ -12,6 +12,8 @@
 #include <vector>
 
 #include "camera.h"
+#include "color.h"
+#include "framebuffer.h"
 #include "mesh.h"
 #include "model.h"
 #include "renderer.h"
@@ -51,8 +53,8 @@ void handleMouse(GLFWwindow* window);
 void scrollCallback(GLFWwindow* window, double xOffset, double yOffset);
 
 // Shaders
-// Build both shader programs again and keep the old one of each that fails
-void reloadShaders(GLuint& program, GLuint& lineProgram);
+// Build the shader programs again and keep the old one of each that fails
+void reloadShaders(GLuint& program, GLuint& lineProgram, GLuint& toneMapProgram);
 
 // Models
 // The sphere as a model with one part, drawn with white textures and the panel's material
@@ -119,8 +121,8 @@ void scrollCallback(GLFWwindow* window, double xOffset, double yOffset) {
 
 // Build the shaders again from the files
 // If the new version has an error, the old program stays in use.
-// The sphere shader and the line shader are checked one by one.
-void reloadShaders(GLuint& program, GLuint& lineProgram) {
+// The sphere shader, the line shader and the tone mapping shader are checked one by one.
+void reloadShaders(GLuint& program, GLuint& lineProgram, GLuint& toneMapProgram) {
   GLuint newProgram = loadShaderProgram(shaderFolder, "mesh.vert", fragmentFiles);
   if (newProgram == 0) {
     std::printf("Keeping the old shaders\n");
@@ -137,6 +139,15 @@ void reloadShaders(GLuint& program, GLuint& lineProgram) {
     glDeleteProgram(lineProgram);
     lineProgram = newLineProgram;
     std::printf("Line shaders reloaded\n");
+  }
+
+  GLuint newToneMapProgram = loadShaderPair(shaderFolder, "fullscreen.vert", "tonemap.frag");
+  if (newToneMapProgram == 0) {
+    std::printf("Keeping the old tone mapping shaders\n");
+  } else {
+    glDeleteProgram(toneMapProgram);
+    toneMapProgram = newToneMapProgram;
+    std::printf("Tone mapping shaders reloaded\n");
   }
 }
 
@@ -212,7 +223,8 @@ int main(int argc, char** argv) {
   // Open as a normal maximized window so the scene gets most of the screen
   glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
 
-  // Four samples per pixel smooth the jagged edge of the sphere
+  // Four samples per pixel in the window too, which smooth the edges of the panel's arrows
+  // The scene gets its own samples in the HDR target.
   glfwWindowHint(GLFW_SAMPLES, 4);
 
   // Scale the window and the panel for high resolution screens
@@ -254,7 +266,8 @@ int main(int argc, char** argv) {
   // Load the shaders
   GLuint program = loadShaderProgram(shaderFolder, "mesh.vert", fragmentFiles);
   GLuint lineProgram = loadShaderPair(shaderFolder, "line.vert", "line.frag");
-  if (program == 0 || lineProgram == 0) {
+  GLuint toneMapProgram = loadShaderPair(shaderFolder, "fullscreen.vert", "tonemap.frag");
+  if (program == 0 || lineProgram == 0 || toneMapProgram == 0) {
     std::printf("Could not load the shaders, stopping\n");
     shutdownUi();
     glfwTerminate();
@@ -297,6 +310,27 @@ int main(int argc, char** argv) {
   // Axes for the small indicator in the corner of each view
   LineMesh axes = createAxes(AXIS_LENGTH);
 
+  // The HDR target the scene is drawn into, made for the size the window has now
+  // Four samples per pixel are asked for, which smooth the jagged edges of the model.
+  int startFramebufferWidth, startFramebufferHeight;
+  glfwGetFramebufferSize(window, &startFramebufferWidth, &startFramebufferHeight);
+  HdrTarget hdrTarget;
+  if (!createHdrTarget(hdrTarget, std::max(startFramebufferWidth, 1), std::max(startFramebufferHeight, 1))) {
+    std::printf("Could not make the HDR target, stopping\n");
+    shutdownUi();
+    glfwTerminate();
+    return 1;
+  }
+
+  // The tone mapping triangle has no vertex buffer, but drawing needs a vertex array bound
+  GLuint emptyVertexArray;
+  glGenVertexArrays(1, &emptyVertexArray);
+
+  // Neutral dark gray background, a little darker than the panel
+  // It is picked by eye, so it is turned into a linear value like the other colors.
+  // Alpha 0 marks it as not part of the scene, so the last pass gives it only the sRGB step.
+  float background = srgbToLinear(0.15f);
+
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_MULTISAMPLE);
 
@@ -327,7 +361,7 @@ int main(int argc, char** argv) {
     // R reloads the shaders once per key press, not every frame it is held
     bool reloadKeyDown = !typing && glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS;
     if (reloadKeyDown && !reloadKeyWasDown) {
-      reloadShaders(program, lineProgram);
+      reloadShaders(program, lineProgram, toneMapProgram);
     }
     reloadKeyWasDown = reloadKeyDown;
 
@@ -354,14 +388,16 @@ int main(int argc, char** argv) {
     }
 
     // The sphere takes its material from the panel
+    // The panel color is picked by eye, so it is turned into a linear value like the colors of a texture.
     Material& sphereMaterial = sphere.parts[0].material;
-    sphereMaterial.baseColorFactor = glm::vec4(settings.baseColor, 1.0f);
+    sphereMaterial.baseColorFactor = glm::vec4(srgbToLinear(settings.baseColor), 1.0f);
     sphereMaterial.metallicFactor = settings.metallic;
     sphereMaterial.roughnessFactor = settings.roughness;
 
-    // Use the framebuffer size, which differs from the window size on Mac Retina screens
-    int width, height;
-    glfwGetFramebufferSize(window, &width, &height);
+    // Use the framebuffer size read at the top of the frame,
+    // which differs from the window size on Mac Retina screens
+    int width = framebufferWidth;
+    int height = framebufferHeight;
     int windowWidth, windowHeight;
     glfwGetWindowSize(window, &windowWidth, &windowHeight);
 
@@ -373,16 +409,31 @@ int main(int argc, char** argv) {
       sceneWidth = 1;
     }
 
-    // Neutral dark gray background, a little darker than the panel
-    // The whole window is cleared before the strips are drawn.
-    glClearColor(0.15f, 0.15f, 0.15f, 1.0f);
+    // A new window size needs a new HDR target
+    // If it cannot be made there is nothing to draw into, so the program stops.
+    if (!resizeHdrTarget(hdrTarget, width, height)) {
+      std::printf("Could not make the HDR target for the new window size, stopping\n");
+      break;
+    }
+
+    // The scene goes into the HDR target, which is cleared as a whole first
+    glBindFramebuffer(GL_FRAMEBUFFER, hdrTarget.framebuffer);
+    glClearColor(background, background, background, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // The scene is drawn in strips, one per view of the view mode
     const Model& shownModel = (shownChoice == 0) ? sphere : fileModel;
     drawScene(program, lineProgram, shownModel, grid, axes, camera, settings, sceneWidth, height);
 
+    // Draw the HDR picture onto the window with the tone mapping pass
+    // It treats each sample on its own and averages them there.
+    // The HDR texture cannot be read while it is being drawn into, so the window is bound first.
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    drawToneMap(toneMapProgram, hdrTarget.colorTexture, hdrTarget.samples, emptyVertexArray, settings,
+                sceneWidth, width, height);
+
     // The panel is drawn last so it sits on top
+    // It goes straight onto the window, so the tone mapping does not change its colors.
     drawUi();
 
     glfwSwapBuffers(window);
@@ -393,8 +444,11 @@ int main(int argc, char** argv) {
   deleteModel(fileModel);
   deleteLines(grid);
   deleteLines(axes);
+  deleteHdrTarget(hdrTarget);
+  glDeleteVertexArrays(1, &emptyVertexArray);
   glDeleteProgram(program);
   glDeleteProgram(lineProgram);
+  glDeleteProgram(toneMapProgram);
 
   shutdownUi();
   glfwTerminate();

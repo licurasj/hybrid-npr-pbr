@@ -14,9 +14,14 @@ struct TextureSettings {
   GLint wrapT = GL_REPEAT;                    // along V
   GLint minFilter = GL_LINEAR_MIPMAP_LINEAR;  // when the texture is drawn smaller than it is
   GLint magFilter = GL_LINEAR;                // when the texture is drawn larger than it is
+
+  // True for textures that hold colors (base color, emissive). They are stored as sRGB, so the
+  // GPU turns them into linear values when the shader reads them. Textures that hold data
+  // (metallic-roughness, normal, occlusion) stay false and are read as they are.
+  bool srgb = false;
 };
 
-// All textures are stored as 8 bit RGBA for now, with mipmaps.
+// All textures are stored as 8 bits per channel RGBA, with mipmaps.
 // Images are not flipped: their first row goes into the first row of the texture.
 // Each function returns 0 if the image could not be read, after printing why.
 

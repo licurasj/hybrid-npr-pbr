@@ -12,6 +12,22 @@ struct Settings {
   // Light brightness, the light color is white
   float lightIntensity = 3.0f;
 
+  // Brightness factor before the tone curve, 1 leaves the picture as it is
+  float exposure = 1.0f;
+
+  // Tone curve that squeezes bright values into what the screen can show,
+  // in the order of the tone curve menu: 0 Off, 1 Reinhard, 2 ACES fit
+  int toneCurve = 0;
+
+  // Whether the NPR view also gets exposure and the tone curve
+  // When it is off, the NPR colors are shown as computed, only cut off at 1.
+  bool toonUsesToneMapping = true;
+
+  // Whether a debug view gets exposure and the tone curve
+  // It is set again each time the debug view changes, see the debug view menu in the panel.
+  // The normal lit picture always gets them.
+  bool debugViewToneMapping = true;
+
   // Flat ambient color used by the stylized ambient
   glm::vec3 ambientColor = glm::vec3(0.2f, 0.2f, 0.2f);
 
@@ -27,6 +43,11 @@ struct Settings {
   // Blend weights for shadow, diffuse, specular and ambient
   // 0 is physical and 1 is stylized.
   float weights[4] = { 0.5f, 0.5f, 0.5f, 0.5f };
+
+  // Blend weight for the tone mapping of the Hybrid view
+  // 0 shows it like the PBR view and 1 like the NPR view.
+  // When the NPR view uses tone mapping too, both ends are the same.
+  float toneMappingWeight = 0.5f;
 
   // Which views are shown side by side, in the order of the view mode menu
   // 0 shows PBR, Hybrid and NPR side by side.

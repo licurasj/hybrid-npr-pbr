@@ -162,51 +162,127 @@ written at the same time in separate files.
 
 ## HDR and color space (Both)
 
-**What gets done.** The scene is drawn into a float texture, then a last pass applies exposure, a
-tone curve and the sRGB conversion.
+**What gets done.** The scene is drawn into a float target that can hold values above 1. A last
+pass then applies exposure, a tone curve and the conversion to screen colors (sRGB), strip by
+strip, so PBR, Hybrid and NPR can each get their own amount of it.
 
-**Files.** `src/framebuffer.h/.cpp`, `shaders/fullscreen.vert`, `shaders/tonemap.frag`,
-`src/renderer.cpp`, `src/texture.cpp`, `src/settings.h` (exposure, tone curve choice),
-`src/ui.cpp`.
+**Files.** `src/framebuffer.h/.cpp` (the HDR target), `src/color.h/.cpp` (one small sRGB helper),
+`shaders/fullscreen.vert`, `shaders/tonemap.frag`, `src/renderer.cpp` (`drawToneMap`),
+`src/main.cpp` (frame order), `src/texture.cpp` and `src/model.cpp` (sRGB textures),
+`src/settings.h` and `src/ui.cpp` (the Tone mapping section and the fifth blend slider).
+
+**A few words first.** *Multisampling* (MSAA) stores several samples per pixel, here 4, so edges
+come out smooth. On an edge some samples belong to the model and some to what is behind it. The
+usual way is to average the samples into a normal texture first (the *resolve*), but then the
+model and the grid or background on an edge are mixed before the last pass can tell them apart.
+So we skip that step: the last pass reads every sample on its own, treats it, and averages after.
+*Linear* values are proportional to the amount of light, which is what the lighting math needs; *sRGB* is
+the curved scale screens and image files use.
 
 **How.**
 
-1. HDR target in `framebuffer`:
-   - `glGenFramebuffers`, `glBindFramebuffer(GL_FRAMEBUFFER, fbo)`
-   - Color: `glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, NULL)`,
-     filters `GL_LINEAR`, then
-     `glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0)`
-   - Depth: `glGenRenderbuffers`, `glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h)`,
-     `glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo)`
-   - `glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE`
-   - Recreate the textures when the window size changes.
-2. Frame order: bind the HDR target, draw the scene, bind framebuffer 0, draw the tone mapping
-   pass, then ImGui.
-3. `fullscreen.vert`, one triangle that covers the screen with no vertex buffer (a vertex array
-   must still be bound):
-   - `vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);`
-   - `uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);`
-   - Draw with `glDrawArrays(GL_TRIANGLES, 0, 3)`.
-4. `tonemap.frag`: `c = texture(uHdr, uv).rgb * uExposure`, then one of
-   - Off: `clamp(c, 0, 1)`
-   - Reinhard: `c / (1 + c)`
-   - ACES fit: `(c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14)`, clamped to 0..1
-
-   then linear to sRGB per channel:
-   `c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1.0 / 2.4) - 0.055`.
-5. Keep `GL_FRAMEBUFFER_SRGB` disabled.
-6. Why the check numbers work: a white sphere with light intensity pi gives
-   `1 / pi * 1 * pi = 1`, which is 255. At N.L = 0.5 the linear value 0.5 becomes 0.735 after the
-   sRGB conversion, which is 188.
-7. Textures, in `texture.cpp`: right now every texture is uploaded as `GL_RGBA8`. In this part
-   the base color texture (and later the emissive one) switches to `GL_SRGB8_ALPHA8`, so the GPU
-   turns its colors into linear values when the shader reads them. Do it in the same change as
-   the output conversion, or the colors come out too dark. Metallic-roughness, normal and
-   occlusion textures hold data, not colors, so they stay `GL_RGBA8`.
-8. Debug views and the sRGB step: the metallic, roughness and normal views must skip the output
-   conversion and show their raw values, so they keep matching the Khronos glTF Sample Viewer.
-   That viewer converts only its Base Color view to sRGB for display, so ours can go through the
-   conversion like the lit image.
+1. HDR target, in `framebuffer` (`HdrTarget`, `createHdrTarget`):
+   - Color is a multisample texture, so a shader can read its samples:
+     `glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, HDR_SAMPLES, GL_RGBA16F, w, h, GL_TRUE)`,
+     attached with `glFramebufferTexture2D(..., GL_TEXTURE_2D_MULTISAMPLE, tex, 0)`. It has no
+     filters or wrap to set, since samples are read one by one.
+   - Depth is only needed while drawing, so it stays a renderbuffer:
+     `glRenderbufferStorageMultisample(GL_RENDERBUFFER, HDR_SAMPLES, GL_DEPTH_COMPONENT24, w, h)`,
+     attached with `glFramebufferRenderbuffer`.
+   - The depth buffer needs the same sample count as the color, and when a texture and a
+     renderbuffer are mixed like this, the texture has to use fixed sample positions (the last
+     `GL_TRUE`), or the framebuffer is incomplete.
+   - 4 is the count we ask for. OpenGL 4.1 only promises 1 sample for a multisample texture
+     (renderbuffers get at least 4), so we ask for fewer if `GL_MAX_COLOR_TEXTURE_SAMPLES` is
+     lower. The driver may also give more, which works as long as color and depth get the same
+     count, so `createHdrTarget` asks how many the color really has
+     (`glGetTexLevelParameteriv` with `GL_TEXTURE_SAMPLES`) and the tone mapping pass reads
+     that many. `glCheckFramebufferStatus` checks the result; when it fails, ours
+     prints the reason and the real sample counts of color and depth (`GL_RENDERBUFFER_SAMPLES`
+     for the depth).
+   - `resizeHdrTarget` is called every frame with the framebuffer size and only makes everything
+     again when the size changed.
+2. Frame order, in `main.cpp`: read the framebuffer size once at the top of the frame, bind the
+   HDR framebuffer, clear it, draw the strips as before (`drawScene`), bind framebuffer 0 (the
+   window), draw the tone mapping pass (`drawToneMap`), then ImGui. Framebuffer 0 has to be bound
+   before the pass, since a shader can't safely read a texture that is attached to the
+   framebuffer it draws into. The window keeps its own 4 samples too (`GLFW_SAMPLES`), which keep
+   the panel's arrows smooth.
+3. `fullscreen.vert`: one triangle that covers the screen, with no vertex buffer.
+   - `vec2 corner = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);`
+   - `gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);`
+   - The core profile still wants a vertex array bound for `glDrawArrays(GL_TRIANGLES, 0, 3)`,
+     so `main.cpp` makes one empty vertex array for it. The pass unbinds it again at the end.
+4. Reading the samples in `tonemap.frag`: the HDR texture is a `sampler2DMS`, bound to
+   `GL_TEXTURE_2D_MULTISAMPLE`. The texture is the same size as the window, so the pixel's own
+   position is its texel: `ivec2 pixel = ivec2(gl_FragCoord.xy)`. A loop reads each sample with
+   `texelFetch(uHdrImage, pixel, i)`, gives it its own treatment (below), adds it up, and divides
+   by the sample count at the end. No filtering is involved, so neighbouring pixels and strips
+   never mix.
+5. The treatment of one sample:
+   - Take `max(c, 0)` first: negative values can't be shown, and `pow` is not defined for them.
+   - Exposure goes before the curve: `c * uExposure`, then one of
+     - Off: `clamp(c, 0, 1)`
+     - Reinhard: `c / (1 + c)`
+     - ACES fit (Narkowicz): `(c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14)`, and
+       the result is clamped to 0..1. It darkens a little on purpose: an input of 1 comes out
+       at about 0.8.
+   - Then linear to sRGB per channel, on values already in 0..1:
+     `c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1.0 / 2.4) - 0.055`.
+   - `uToneAmount` says how much of exposure and the curve a strip gets. The shader makes the
+     color both ways (only clamped, and with exposure and the curve), does the sRGB step on both,
+     and mixes them by the amount.
+6. One pass per strip (`drawToneMap` in `renderer.cpp`): the viewport stays the whole window, so
+   each pixel reads its own place in the HDR picture, and `glScissor` limits each draw to
+   one strip, with the same strip edges as `drawScene`. Depth test is off during the pass. The
+   amount per strip:
+   - PBR: always 1, the full treatment (in a debug view only while the debug tick is on, see
+     Debug views below).
+   - NPR: 1 when the "NPR uses tone mapping" tick is on (it starts on), 0 when off, so the NPR
+     colors are shown as computed, only cut off at 1.
+   - Hybrid: the fifth blend slider "Tone mapping" mixes the two,
+     `(1 - w) * 1 + w * nprAmount`. Both ends are treatments of the Hybrid strip itself, with its
+     own four blend weights: at 0 it is shown the way PBR is shown, at 1 the way NPR is shown. It
+     doesn't turn the Hybrid strip into the PBR or NPR picture. Because the shader mixes the
+     results by the amount, mixing the amounts gives the same as mixing the two treated Hybrid
+     pictures. With the tick on, both ends are 1 and the slider changes nothing.
+   - One more scissored draw with amount 0 covers the area under the panel, so nothing old is
+     left there.
+7. Scene mark in alpha: the model writes alpha 1 (`hybrid_main.glsl`), the grid and axes write
+   0 (`line.frag`), and the clear color has alpha 0. The tone mapping pass gives pixels marked 0
+   only the sRGB step, so the background, grid and axes look the same whatever exposure and
+   curve are set to. Each sample has a clean 0 or 1, and on the model's edges the pass treats
+   the model samples and the background samples each by their own rule before averaging.
+8. Hand-picked colors are sRGB: the background gray (0.15), the grid and axis colors, and the
+   panel's base color and ambient color were all picked by eye on screen. `srgbToLinear` in
+   `color.cpp` turns them into linear values once, before they are used, so after the last pass
+   they come out as picked. Later ramp colors should go the same way.
+9. Textures, in `texture.cpp` and `model.cpp`: `TextureSettings` has an `srgb` flag. Base color
+   and emissive textures set it and are uploaded as `GL_SRGB8_ALPHA8`, so the GPU turns their
+   colors into linear values when the shader reads them (alpha is not converted).
+   Metallic-roughness, normal and occlusion textures hold data, not colors, so they stay
+   `GL_RGBA8`, and so does the shared white fallback (1 stays 1 either way). Since the format
+   lives in the texture, "srgb" or "plain" is part of the texture cache key, next to the image
+   name, wrap and filter.
+10. Debug views:
+    - Base color always gets the sRGB step, like the lit picture. The Khronos glTF Sample Viewer
+      converts its Base Color view the same way.
+    - Metallic, roughness, normal and shadow are data, so they never get the sRGB step and show
+      their stored values. That keeps them matching the Khronos viewer.
+    - The "Exposure and tone curve on debug view" tick decides whether a debug view also gets
+      exposure and the curve. It sets itself each time the Debug view menu changes: off for base
+      color, metallic, roughness, normal and shadow, on for the diffuse, specular and ambient
+      terms, which are light and can go above 1. You can change it afterwards. With it on, the
+      data views get exposure and the curve but still no sRGB step. The Default view always gets
+      the full treatment, so the tick is grayed out there.
+11. Keep `GL_FRAMEBUFFER_SRGB` off. The shader does the conversion, so it happens exactly once,
+    and ImGui draws straight onto the window afterwards with its colors unchanged.
+12. Why the check numbers work (curve Off, exposure 1, PBR view, Diffuse debug view with the
+    debug tick on, so it gets the same treatment as the lit picture): a white sphere with light
+    intensity pi gives `1 / pi * 1 * pi = 1`, which is 255. At N.L = 0.5 the linear value 0.5
+    becomes 0.735 after the sRGB step, which is 188, not 128. The Default view adds the ambient
+    light and the highlight on top, so it reads a bit brighter there (about 192). A gray 128 texture reads 128 in the
+    base color debug view: the texture turns it into linear and the last pass turns it back.
 
 ---
 
@@ -314,8 +390,8 @@ includes Assimp headers; the rest of the program sees the plain `Model` struct.
      otherwise keep `GL_LINEAR_MIPMAP_LINEAR` and `GL_LINEAR`.
 
    Keep a map from name plus these settings to texture id, so an image used several times the
-   same way loads once. In OpenGL 4.1 the wrap and filter live in the texture itself, so the
-   same image with other settings becomes a second texture. If the base color or
+   same way loads once. In OpenGL 4.1 the wrap, the filter and the format (sRGB or plain) live in
+   the texture itself, so the same image with other settings becomes a second texture. If the base color or
    metallic-roughness texture has a texture transform (`AI_MATKEY_UVTRANSFORM`, from the
    KHR_texture_transform extension), we print a warning, because the viewer doesn't apply it yet.
 
@@ -324,11 +400,12 @@ includes Assimp headers; the rest of the program sees the plain `Model` struct.
    it, so it gets glTF's default values (white, metallic 1, roughness 1).
 6. Upload in `texture`:
    - `stbi_load(path, &w, &h, &channels, 4)` (4 asks for RGBA every time), then `glTexImage2D` with
-     internal format `GL_RGBA8`, `glGenerateMipmap(GL_TEXTURE_2D)`, the min and mag filter and
-     the wrap S and T from the texture's settings (`glTexParameteri`), and `stbi_image_free`.
-   - For now every texture is `GL_RGBA8`, base color too, so the colors are not converted yet.
-     Base color switches to an sRGB format in "HDR and color space", together with the output
-     conversion.
+     internal format `GL_SRGB8_ALPHA8` for color textures or `GL_RGBA8` for data textures,
+     `glGenerateMipmap(GL_TEXTURE_2D)`, the min and mag filter and the wrap S and T from the
+     texture's settings (`glTexParameteri`), and `stbi_image_free`.
+   - Base color and emissive textures hold colors, so they are sRGB; metallic-roughness, normal
+     and occlusion hold data and stay `GL_RGBA8`. The `srgb` flag in `TextureSettings` carries
+     the choice, and it is part of the cache key above. See "HDR and color space" for why.
    - Don't flip the images. Their first row is the top, and with FlipUVs the UVs count from the
      top too, so the two match.
    - A missing texture gets a shared 1 x 1 white texture, so texture times factor is just the

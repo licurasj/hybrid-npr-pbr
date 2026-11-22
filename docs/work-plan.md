@@ -40,7 +40,7 @@ Put your name next to a part when you start it, and update the status when it wo
 | Project skeleton | Lucas | Done |
 | Phong sphere | Lucas | Done |
 | Term skeleton and comparison view | Lucas | Done |
-| HDR and color | | Not started |
+| HDR and color | Lucas | Done |
 | glTF loading | Lucas | Done |
 | Test materials | | Not started |
 | Ramp shading and stylized highlight | | Not started |

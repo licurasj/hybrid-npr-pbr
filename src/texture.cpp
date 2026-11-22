@@ -12,7 +12,9 @@ GLuint createTexture(const unsigned char* pixels, int width, int height, const T
   GLuint texture;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+  // Color textures are stored as sRGB and data textures as plain values
+  GLint format = settings.srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
+  glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 
   // Smaller copies of the image for when the texture is far away
   // They are made every time, even if the filter below does not use them.

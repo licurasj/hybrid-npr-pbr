@@ -3,6 +3,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <imgui.h>
 
+#include "color.h"
 #include "shader.h"
 #include "ui.h"
 
@@ -31,6 +32,16 @@ const int VIEW_MODES[7][3] = {
 };
 
 
+// Number of views in one row of the table above
+static int countViews(const int* views) {
+  int count = 0;
+  while (count < 3 && views[count] != NO_VIEW) {
+    count++;
+  }
+  return count;
+}
+
+
 // Uniforms that are the same in every strip
 static void setSharedUniforms(GLuint program, const Model& model, const Camera& camera,
                               const Settings& settings) {
@@ -41,7 +52,8 @@ static void setSharedUniforms(GLuint program, const Model& model, const Camera& 
   // The light direction points from the surface toward the light
   setUniform(program, "uLightDir", directionFromAngles(settings.lightYaw, settings.lightPitch));
   setUniform(program, "uLightRadiance", glm::vec3(settings.lightIntensity));
-  setUniform(program, "uAmbientColor", settings.ambientColor);
+  // The ambient color is picked by eye, so it is turned into a linear value like the base color
+  setUniform(program, "uAmbientColor", srgbToLinear(settings.ambientColor));
   setUniform(program, "uShininess", settings.shininess);
 
   // Each texture in the shader reads from its own texture unit
@@ -189,12 +201,7 @@ void drawScene(GLuint program, GLuint lineProgram, const Model& model, const Lin
                const LineMesh& axes, const Camera& camera, const Settings& settings,
                int sceneWidth, int sceneHeight) {
   const int* views = VIEW_MODES[settings.viewMode];
-
-  // Count the views of this mode
-  int count = 0;
-  while (count < 3 && views[count] != NO_VIEW) {
-    count++;
-  }
+  int count = countViews(views);
 
   glUseProgram(program);
   setSharedUniforms(program, model, camera, settings);
@@ -241,4 +248,95 @@ void drawScene(GLuint program, GLuint lineProgram, const Model& model, const Lin
   // The panel code keeps whatever scissor state it finds,
   // so turn it off or the next clear only reaches the last strip.
   glDisable(GL_SCISSOR_TEST);
+}
+
+
+// Debug views in the order of the debug view menu
+const int DEBUG_LIT = 0;
+const int DEBUG_BASE_COLOR = 1;
+const int DEBUG_SHADOW = 5;
+
+
+// How much exposure and the tone curve one kind of view gets, 1 is all and 0 none
+// PBR always gets them, NPR only when its tick is on,
+// and Hybrid mixes the two by the tone mapping blend slider.
+static float viewToneAmount(int view, const Settings& settings) {
+  float toonAmount = settings.toonUsesToneMapping ? 1.0f : 0.0f;
+  if (view == VIEW_REALISTIC) {
+    return 1.0f;
+  } else if (view == VIEW_TOON) {
+    return toonAmount;
+  }
+  // The shader mixes the two results by this amount, so mixing the amounts
+  // gives the same picture as mixing the PBR and NPR pictures.
+  float realisticAmount = 1.0f;
+  float w = settings.toneMappingWeight;
+  return (1.0f - w) * realisticAmount + w * toonAmount;
+}
+
+
+// Draw the full-screen triangle with the tone mapping shader
+void drawToneMap(GLuint toneMapProgram, GLuint hdrImage, int sampleCount, GLuint emptyVertexArray,
+                 const Settings& settings, int sceneWidth, int width, int height) {
+  // The viewport stays the whole window so each pixel reads its own place in the HDR picture.
+  // The scissor test then lets each strip be drawn with its own amount.
+  glViewport(0, 0, width, height);
+  glEnable(GL_SCISSOR_TEST);
+
+  // The triangle covers everything, so there is nothing for the depth test to do
+  glDisable(GL_DEPTH_TEST);
+
+  glUseProgram(toneMapProgram);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, hdrImage);
+  glBindVertexArray(emptyVertexArray);
+  setUniform(toneMapProgram, "uHdrImage", 0);
+  setUniform(toneMapProgram, "uSampleCount", sampleCount);
+  setUniform(toneMapProgram, "uExposure", settings.exposure);
+  setUniform(toneMapProgram, "uToneCurve", settings.toneCurve);
+
+  // Base color is a color, so it gets the sRGB step.
+  // Metallic, roughness, normal and shadow are data, so they are shown as stored.
+  // The lit picture and the light terms are colors that can go above 1.
+  int sceneToSrgb = 1;
+  if (settings.debugView > DEBUG_BASE_COLOR && settings.debugView <= DEBUG_SHADOW) {
+    sceneToSrgb = 0;
+  }
+  setUniform(toneMapProgram, "uSceneToSrgb", sceneToSrgb);
+
+  // A debug view gets exposure and the curve only when its tick is on
+  bool useToneMapping = (settings.debugView == DEBUG_LIT) || settings.debugViewToneMapping;
+
+  // One pass per strip, with the same strip edges as the scene
+  const int* views = VIEW_MODES[settings.viewMode];
+  int count = countViews(views);
+  for (int i = 0; i < count; i++) {
+    int left = i * sceneWidth / count;
+    int right = (i + 1) * sceneWidth / count;
+    if (right - left < 1) {
+      continue;
+    }
+
+    float toneAmount = 0.0f;
+    if (useToneMapping) {
+      toneAmount = viewToneAmount(views[i], settings);
+    }
+    setUniform(toneMapProgram, "uToneAmount", toneAmount);
+
+    glScissor(left, 0, right - left, height);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+  }
+
+  // The space under the panel holds only background, which the amount does not change,
+  // but it still needs a pass so nothing old is left there.
+  if (sceneWidth < width) {
+    setUniform(toneMapProgram, "uToneAmount", 0.0f);
+    glScissor(sceneWidth, 0, width - sceneWidth, height);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+  }
+
+  glDisable(GL_SCISSOR_TEST);
+  glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
+  glBindVertexArray(0);
+  glEnable(GL_DEPTH_TEST);
 }

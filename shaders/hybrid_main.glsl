@@ -39,6 +39,7 @@ void main() {
 
   // Debug views show one value on its own, in the same order as the debug view menu
   // The term views show the blended term for the weights of this strip.
+  // Alpha 1 marks the pixel as part of the scene for the last pass (background and lines write 0).
   if (uDebugView == 1) {
     fragColor = vec4(s.baseColor, 1.0);
   } else if (uDebugView == 2) {
