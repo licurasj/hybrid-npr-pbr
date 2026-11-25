@@ -2,6 +2,10 @@
 
 #include <glm/glm.hpp>
 
+// The first two entries of the model menu, which are built by the program and not loaded from files
+const int MODEL_SPHERE = 0;
+const int MODEL_SPHERE_GRID = 1;
+
 // Every value the control panel can change
 // The panel writes these and the drawing code reads them.
 struct Settings {
@@ -31,7 +35,8 @@ struct Settings {
   // Flat ambient color used by the stylized ambient
   glm::vec3 ambientColor = glm::vec3(0.2f, 0.2f, 0.2f);
 
-  // Which entry of the model menu is shown, 0 is the sphere
+  // Which entry of the model menu is shown, see MODEL_SPHERE and MODEL_SPHERE_GRID below
+  // The model files come after those two.
   int modelChoice = 0;
 
   // Material of the sphere, a loaded model uses the values from its file

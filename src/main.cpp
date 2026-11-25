@@ -59,6 +59,8 @@ void reloadShaders(GLuint& program, GLuint& lineProgram, GLuint& toneMapProgram)
 // Models
 // The sphere as a model with one part, drawn with white textures and the panel's material
 Model createSphereModel();
+// 7 x 7 spheres with metallic growing upward and roughness growing to the right
+Model createSphereGridModel();
 // Paths of the model files in a folder, sorted by name
 std::vector<std::string> findModelFiles(const std::string& folder);
 
@@ -177,6 +179,47 @@ Model createSphereModel() {
 }
 
 
+// Number of spheres along each side of the sphere grid
+const int GRID_COUNT = 7;
+
+// Distance between the centers of two neighbouring spheres in the grid, for spheres of radius 1
+const float GRID_SPACING = 2.5f;
+
+// 7 x 7 spheres in a wall facing the camera, like the sphere grid on the LearnOpenGL PBR pages
+// Metallic goes from 0 in the bottom row to 1 in the top row and roughness from 0 in the left
+// column to 1 in the right column. Every sphere is its own part with its own material,
+// and the main loop copies the panel's base color into all of them.
+Model createSphereGridModel() {
+  Model grid;
+  GLuint white = createWhiteTexture();
+  grid.textures.push_back(white);
+
+  // The middle sphere sits at the origin
+  float half = (GRID_COUNT - 1) * 0.5f;
+  for (int row = 0; row < GRID_COUNT; row++) {
+    for (int column = 0; column < GRID_COUNT; column++) {
+      glm::vec3 center((column - half) * GRID_SPACING, (row - half) * GRID_SPACING, 0.0f);
+
+      ModelPart part;
+      part.mesh = createSphere(32, 64, center, 1.0f);
+      part.material.baseColorTexture.id = white;
+      part.material.metallicRoughnessTexture.id = white;
+      part.material.occlusionTexture.id = white;
+      part.material.emissiveTexture.id = white;
+      part.material.metallicFactor = (float)row / (GRID_COUNT - 1);
+      part.material.roughnessFactor = (float)column / (GRID_COUNT - 1);
+      grid.parts.push_back(part);
+    }
+  }
+
+  // The box around the outer spheres, which have radius 1
+  float edge = half * GRID_SPACING + 1.0f;
+  grid.boundsMin = glm::vec3(-edge, -edge, -1.0f);
+  grid.boundsMax = glm::vec3(edge, edge, 1.0f);
+  return grid;
+}
+
+
 // Paths of the glTF, GLB, OBJ and FBX files in a folder, sorted by name
 // A missing folder gives an empty list. Entries that cannot be read are skipped.
 std::vector<std::string> findModelFiles(const std::string& folder) {
@@ -280,10 +323,12 @@ int main(int argc, char** argv) {
     assetFolder = "assets/";
   }
 
-  // The model menu: the sphere first, then the files in assets/models
-  // modelPaths has the file of each menu entry, and an empty path for the sphere.
-  std::vector<std::string> modelNames = { "Sphere" };
-  std::vector<std::string> modelPaths = { "" };
+  // The model menu: the sphere and the sphere grid first, then the files in assets/models
+  // modelPaths has the file of each menu entry, and an empty path for the two built in ones.
+  // A file entry with an empty path (an empty command line argument) fails to load like any
+  // other missing file.
+  std::vector<std::string> modelNames = { "Sphere", "Sphere grid" };
+  std::vector<std::string> modelPaths = { "", "" };
   for (const std::string& path : findModelFiles(assetFolder + "models")) {
     modelNames.push_back(std::filesystem::path(path).filename().string());
     modelPaths.push_back(path);
@@ -296,8 +341,9 @@ int main(int argc, char** argv) {
     settings.modelChoice = (int)modelPaths.size() - 1;
   }
 
-  // The sphere stays loaded the whole time, a model file only while it is shown
+  // The sphere and the sphere grid stay loaded the whole time, a model file only while it is shown
   Model sphere = createSphereModel();
+  Model sphereGrid = createSphereGridModel();
   Model fileModel;
   int shownChoice = 0;
 
@@ -368,9 +414,10 @@ int main(int argc, char** argv) {
     // Load the model picked in the menu
     // If it does not load, the model that was shown stays and the menu goes back to it.
     if (settings.modelChoice != shownChoice) {
-      if (settings.modelChoice == 0) {
+      if (settings.modelChoice == MODEL_SPHERE || settings.modelChoice == MODEL_SPHERE_GRID) {
+        // The sphere or the sphere grid, which are already loaded
         deleteModel(fileModel);
-        shownChoice = 0;
+        shownChoice = settings.modelChoice;
         modelMessage = "";
       } else {
         const std::string& path = modelPaths[settings.modelChoice];
@@ -393,6 +440,11 @@ int main(int argc, char** argv) {
     sphereMaterial.baseColorFactor = glm::vec4(srgbToLinear(settings.baseColor), 1.0f);
     sphereMaterial.metallicFactor = settings.metallic;
     sphereMaterial.roughnessFactor = settings.roughness;
+
+    // The sphere grid takes only the base color, each sphere keeps its own metallic and roughness
+    for (ModelPart& part : sphereGrid.parts) {
+      part.material.baseColorFactor = glm::vec4(srgbToLinear(settings.baseColor), 1.0f);
+    }
 
     // Use the framebuffer size read at the top of the frame,
     // which differs from the window size on Mac Retina screens
@@ -422,8 +474,13 @@ int main(int argc, char** argv) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // The scene is drawn in strips, one per view of the view mode
-    const Model& shownModel = (shownChoice == 0) ? sphere : fileModel;
-    drawScene(program, lineProgram, shownModel, grid, axes, camera, settings, sceneWidth, height);
+    const Model* shownModel = &fileModel;
+    if (shownChoice == MODEL_SPHERE) {
+      shownModel = &sphere;
+    } else if (shownChoice == MODEL_SPHERE_GRID) {
+      shownModel = &sphereGrid;
+    }
+    drawScene(program, lineProgram, *shownModel, grid, axes, camera, settings, sceneWidth, height);
 
     // Draw the HDR picture onto the window with the tone mapping pass
     // It treats each sample on its own and averages them there.
@@ -441,6 +498,7 @@ int main(int argc, char** argv) {
 
   // Free the buffers and shaders while the OpenGL context still exists
   deleteModel(sphere);
+  deleteModel(sphereGrid);
   deleteModel(fileModel);
   deleteLines(grid);
   deleteLines(axes);

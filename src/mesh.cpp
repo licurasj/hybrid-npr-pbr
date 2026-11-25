@@ -8,9 +8,9 @@
 #include "color.h"
 
 
-// Make a unit sphere with the given number of rows and columns
+// Make a sphere with the given number of rows and columns
 // Rows go from the top pole to the bottom pole and columns go around the middle.
-Mesh createSphere(int stacks, int slices) {
+Mesh createSphere(int stacks, int slices, glm::vec3 center, float radius) {
   // Each vertex is position, normal, texture coordinate, tangent and second texture coordinate
   std::vector<float> vertices;
   for (int i = 0; i <= stacks; i++) {
@@ -19,10 +19,11 @@ Mesh createSphere(int stacks, int slices) {
       float phi = 2.0f * glm::pi<float>() * j / slices;
       glm::vec3 p(glm::sin(theta) * glm::cos(phi), glm::cos(theta), glm::sin(theta) * glm::sin(phi));
 
-      // On a unit sphere the normal is the same as the position
-      vertices.push_back(p.x);
-      vertices.push_back(p.y);
-      vertices.push_back(p.z);
+      // p is the point on a unit sphere, which is also the normal
+      glm::vec3 position = center + radius * p;
+      vertices.push_back(position.x);
+      vertices.push_back(position.y);
+      vertices.push_back(position.z);
       vertices.push_back(p.x);
       vertices.push_back(p.y);
       vertices.push_back(p.z);

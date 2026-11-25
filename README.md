@@ -11,8 +11,8 @@ Final project for CSCI 420 Computer Graphics at the University of Southern Calif
 
 > **Status: early development.** The window, the control panel, an orbit camera and a test sphere
 > work. The sphere already uses the hybrid shader with its blend sliders and is shown as
-> PBR, Hybrid and NPR side by side, but each lighting term is still a simple placeholder
-> formula: the real PBR and NPR shading described below is not written yet. The build steps have
+> PBR, Hybrid and NPR side by side. The PBR side has its real Cook-Torrance shading, while the
+> NPR side and the ambient light are still simple placeholder formulas. The build steps have
 > been checked on Windows; macOS and Linux are not tested yet.
 
 ## What it does
@@ -117,17 +117,19 @@ the physical version of that term and at 1 the stylized version; values in betwe
 small PBR and NPR labels above the sliders mark these two ends, and hovering a slider says the same.
 Each slider has a small number box next to it where you can type a value and press Enter.
 The fifth blend slider, Tone mapping, works the same way for the screen step described below.
-For now the terms are placeholders, for example the stylized diffuse is just two flat bands. The
-Shadow slider has no visible effect yet, because there are no shadows until the shadow map is added.
+The PBR diffuse and specular are real Cook-Torrance shading. The stylized terms and both ambient
+terms are still placeholders, for example the stylized diffuse is just two flat bands and the
+stylized highlight a Phong spot. The Shadow slider has no visible effect yet, because there are no
+shadows until the shadow map is added.
 The window opens maximized.
 
 ### Loading a model
 
-The Model menu in the panel lists "Sphere" and every model file in `assets/models/` (glTF `.gltf`
-and `.glb`, and also `.obj` and `.fbx`). Pick one and it replaces what is shown. A `.gltf` file
-needs its `.bin` file and its images next to it; a `.glb` file holds everything in one file. To
-try your own model, copy it into `assets/models/` and start the viewer again, or give its path when
-you start the program:
+The Model menu in the panel lists "Sphere", "Sphere grid" and every model file in
+`assets/models/` (glTF `.gltf` and `.glb`, and also `.obj` and `.fbx`). Pick one and it replaces
+what is shown. A `.gltf` file needs its `.bin` file and its images next to it; a `.glb` file holds
+everything in one file. To try your own model, copy it into `assets/models/` and start the viewer
+again, or give its path when you start the program:
 
 ```
 build\Release\viewer.exe C:\path\to\model.glb
@@ -135,10 +137,19 @@ build\Release\viewer.exe C:\path\to\model.glb
 
 The model is moved to the middle of the grid and scaled so its largest side is as big as the test
 sphere, with its bottom on the grid. It is drawn with its own base color, metallic and roughness
-values and textures; the Material sliders in the panel only change the sphere. Each texture uses
-the UV set (first or second) and the wrap and filter settings the file gives it. Texture transforms
-(the glTF KHR_texture_transform extension) are not applied yet; the console prints a warning when
-the base color or metallic-roughness texture has one. If a file cannot be
+values and textures.
+
+"Sphere grid" shows 7 x 7 spheres for checking the PBR shading: metallic goes from 0 in the bottom
+row to 1 in the top row, and roughness from 0 on the left to 1 on the right.
+
+Which Material controls change what: on "Sphere" the Base color, Metallic, Roughness and Shininess
+controls all apply. On "Sphere grid" only Base color (every sphere takes it) and Shininess apply,
+because each sphere has its own metallic and roughness. A model file uses only Shininess; its
+color, metallic and roughness come from the file. Shininess only sizes the stylized highlight.
+
+Each texture uses the UV set (first or second) and the wrap and filter settings the file gives it.
+Texture transforms (the glTF KHR_texture_transform extension) are not applied yet; the console
+prints a warning when the base color or metallic-roughness texture has one. If a file cannot be
 loaded, the reason shows in red under the Model menu and in the console, and the model that was
 shown before stays.
 
@@ -153,7 +164,8 @@ field of view from top to bottom, so the model still fits across each one.
 The Debug view menu under it shows one value on its own in every view: Default is the normal
 picture, then base color, metallic, roughness, the surface normal (as a color, x red, y green, z
 blue), shadow visibility (white everywhere until shadows are added), and the diffuse, specular or
-ambient term alone. Metallic and roughness are not used by the placeholder shading yet.
+ambient term alone. Metallic and roughness are used by the PBR side; the stylized side does not
+use them yet.
 
 Each view also shows a faint grid on the floor under the model, with the X axis line in red and
 the Z axis line in blue, and a small set of axes in its bottom left corner: X red, Y green, Z blue.
@@ -221,8 +233,18 @@ Every model, texture and environment map is listed with its author, source and l
 
 - Karis, "Real Shading in Unreal Engine 4," SIGGRAPH 2013 course.
   https://blog.selfshadow.com/publications/s2013-shading-course/
-- LearnOpenGL, "PBR Theory" and "Specular IBL." https://learnopengl.com/PBR/Theory
+- de Vries, LearnOpenGL, "PBR: Theory," "PBR: Lighting" and "Specular IBL."
+  https://learnopengl.com/PBR/Theory and https://learnopengl.com/PBR/Lighting
+- Khronos Group, "glTF 2.0 Specification," Appendix B: BRDF Implementation.
+  https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html
 - Khronos Group, "PBR in glTF." https://www.khronos.org/gltf/pbr
+- Walter, Marschner, Li and Torrance, "Microfacet Models for Refraction through Rough Surfaces,"
+  Eurographics Symposium on Rendering 2007.
+  https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.html
+- Schlick, "An Inexpensive BRDF Model for Physically-based Rendering," Computer Graphics Forum
+  13(3), 1994. https://doi.org/10.1111/1467-8659.1330233
+- Heitz, "Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs," Journal of
+  Computer Graphics Techniques 3(2), 2014. https://jcgt.org/published/0003/02/03/
 - Gooch, Gooch, Shirley and Cohen, "A Non-Photorealistic Lighting Model for Automatic Technical
   Illustration," SIGGRAPH 1998. https://doi.org/10.1145/280814.280950
 - Mitchell, Francke and Eng, "Illustrative Rendering in Team Fortress 2," NPAR 2007.

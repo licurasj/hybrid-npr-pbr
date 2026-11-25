@@ -240,8 +240,8 @@ struct Light {
 | Term | Physical version, in `pbr_terms.glsl` | Stylized version, in `npr_terms.glsl` |
 |---|---|---|
 | Shadow: `float shadow*(float visibility)` | Returns the filtered shadow map result as is: a soft edge | Sharpens it into a hard edge with an adjustable threshold |
-| Diffuse: `vec3 diffuse*(Surface s, Light l, float shadow)` | Lambert: base color / pi, times N.L, times shadow | Looks up the ramp at `(N.L * 0.5 + 0.5) * shadow`. The shadow moves the lookup position. It is not multiplied on afterward |
-| Specular: `vec3 specular*(Surface s, Light l, float shadow)` | Cook-Torrance: GGX, Smith, Schlick Fresnel, times N.L, times shadow | The GGX term divided by its own peak, cut at a threshold. The result is a flat highlight whose size grows with roughness |
+| Diffuse: `vec3 diffuse*(Surface s, Light l, float shadow)` | Lambert: base color / pi, times N.L, times shadow, times (1 - F)(1 - metallic) with the non-metal F (F0 = 0.04), so metals have none | Looks up the ramp at `(N.L * 0.5 + 0.5) * shadow`. The shadow moves the lookup position. It is not multiplied on afterward |
+| Specular: `vec3 specular*(Surface s, Light l, float shadow)` | Cook-Torrance as in the Khronos glTF Sample Viewer: GGX, height-correlated Smith visibility, Schlick Fresnel, times N.L, times shadow | The GGX term divided by its own peak, cut at a threshold. The result is a flat highlight whose size grows with roughness |
 | Ambient: `vec3 ambient*(Surface s)` | Environment lighting: a very blurred cubemap sample along N for diffuse, plus a cubemap sample along the reflection direction at a mip level chosen by roughness | A flat ambient color times the base color |
 
 The shadow map lookup itself (the depth comparison and the 3 x 3 filtering) is shared code in
@@ -270,9 +270,11 @@ against a reference viewer one input at a time.
 ### Keeping the two sides comparable
 
 Both diffuse versions use the same light and the same base color / pi factor. The ramp only replaces
-the N.L factor. A white ramp gives the same brightness the physical side has where the surface
-faces the light directly, so the two sides stay in the same range and differences on screen come
-from the shading model, not from mismatched brightness.
+the N.L factor. A white ramp gives almost the same brightness the physical side has where the
+surface faces the light directly, so the two sides stay in the same range and differences on screen
+come from the shading model, not from mismatched brightness. Almost, because the physical diffuse
+also loses the few percent of light that the surface reflects as highlight (the non-metal Fresnel
+term; a white sphere reads about 250 instead of 255), and the stylized side has no Fresnel.
 
 The display step is shared the same way: by default both sides get the same exposure and tone
 curve. Unticking "NPR uses tone mapping" takes them away from the NPR side, which is handy for

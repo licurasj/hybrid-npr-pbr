@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glad/gl.h>
+#include <glm/glm.hpp>
 
 #include <vector>
 
@@ -24,8 +25,9 @@ struct Mesh {
 // Upload vertices (FLOATS_PER_VERTEX floats each) and triangle indices to the GPU
 Mesh createMesh(const std::vector<float>& vertices, const std::vector<unsigned int>& indices);
 
-// Make a unit sphere with the given number of rows and columns
-Mesh createSphere(int stacks, int slices);
+// Make a sphere with the given number of rows and columns
+// Without a center and radius it is the unit sphere around the origin.
+Mesh createSphere(int stacks, int slices, glm::vec3 center = glm::vec3(0.0f), float radius = 1.0f);
 
 // Draw the mesh with the shader program that is in use
 void drawMesh(const Mesh& mesh);

@@ -224,7 +224,7 @@ void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>&
     ImGui::Checkbox("Show axes", &settings.showAxes);
   }
 
-  // The sphere or one of the model files
+  // The sphere, the sphere grid or one of the model files
   // Picking an entry only changes the choice, and the main loop then loads the file.
   if (ImGui::CollapsingHeader("Model", ImGuiTreeNodeFlags_DefaultOpen)) {
     const char* shownName = modelNames[settings.modelChoice].c_str();
@@ -288,8 +288,12 @@ void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>&
 
   if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
     // A model file brings its own base color, metallic and roughness
-    if (settings.modelChoice != 0) {
-      ImGui::TextDisabled("These values are used by the sphere only");
+    // The sphere grid uses the base color and sets metallic and roughness for each sphere itself.
+    // Shininess sizes the stylized highlight, so it works on every model.
+    if (settings.modelChoice == MODEL_SPHERE_GRID) {
+      ImGui::TextDisabled("The grid uses Base color and Shininess");
+    } else if (settings.modelChoice != MODEL_SPHERE) {
+      ImGui::TextDisabled("A model file uses only Shininess");
     }
     ImGui::ColorEdit3("Base color", &settings.baseColor.x);
     sliderWithBox("Metallic", &settings.metallic, 0.0f, 1.0f, "%.2f");

@@ -51,8 +51,8 @@ uniform float uWeightSpecular;
 uniform float uWeightAmbient;
 
 
-// Phong highlight used by both specular stand-ins
-// It goes away once the real specular terms are written.
+// Phong highlight used by the stylized specular stand-in
+// It goes away once the stylized specular is written.
 float phongHighlight(Surface s, Light l) {
   // No highlight on the side facing away from the light
   if (dot(s.N, l.L) <= 0.0) {

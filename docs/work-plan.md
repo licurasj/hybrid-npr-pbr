@@ -33,18 +33,19 @@ set up their machine and look for nice free textures and models.
 
 ## Progress
 
-Put your name next to a part when you start it, and update the status when it works.
+Put your name next to a part while you're working on it. When it works, set the status to
+Finished and take your name off again.
 
-| Part | Who | Status |
+| Part | Working on it | Status |
 |---|---|---|
-| Project skeleton | Lucas | Done |
-| Phong sphere | Lucas | Done |
-| Term skeleton and comparison view | Lucas | Done |
-| HDR and color | Lucas | Done |
-| glTF loading | Lucas | Done |
+| Project skeleton | | Finished |
+| Phong sphere | | Finished |
+| Term skeleton and comparison view | | Finished |
+| HDR and color | | Finished |
+| glTF loading | | Finished |
 | Test materials | | Not started |
 | Ramp shading and stylized highlight | | Not started |
-| Cook-Torrance | | Not started |
+| Cook-Torrance | | Finished |
 | Shadow map | | Not started |
 | Shadow in the ramp | | Not started |
 | Environment lighting | | Not started |
@@ -124,16 +125,18 @@ Quick things to look for. They're there to catch mistakes early, not to be ticke
 - **HDR and color.** With the tone curve off and exposure 1, take a screenshot and read colors
   with a color picker. A white sphere under a white light of intensity pi reads 255 where it faces
   the light, and about 188 (not 128) where it is half lit. Later, a gray 128 texture reads 128 in
-  the base color debug view.
+  the base color debug view. Once Cook-Torrance is in, the PBR diffuse loses the few percent of
+  light that the surface reflects as highlight, so the same check reads about 250 and 184 in the
+  Diffuse debug view.
 - **glTF loading.** The base color, metallic, roughness and normal debug views look the same as in
   the Khronos glTF Sample Viewer. Nothing is flipped or swapped.
 - **Test materials.** Metal is white in the metallic debug view and cloth is black. Every file has
   a line in `assets/CREDITS.md`.
 - **Ramp shading and stylized highlight.** A two-color ramp gives exactly one sharp edge. The
   highlight is small on smooth surfaces, large on rough ones, and clean-edged on both.
-- **Cook-Torrance.** A grid of spheres (metallic one way, roughness the other) looks like the
-  reference picture on LearnOpenGL's PBR lighting page. Metals have no diffuse color, and edges
-  get brighter at grazing angles.
+- **Cook-Torrance.** The Sphere grid entry of the model menu (metallic going up, roughness going
+  right) looks like the reference picture on LearnOpenGL's PBR lighting page when the base color
+  is a dark red. Metals have no diffuse color, and edges get brighter at grazing angles.
 - **Shadow map.** A sphere above the ground casts a round shadow in the right place as the light
   moves. No speckles on lit surfaces, and the shadow stays attached to the object.
 - **Shadow in the ramp.** With a three-band ramp, the cast shadow and the dark side of the shading

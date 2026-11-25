@@ -283,6 +283,8 @@ the curved scale screens and image files use.
     becomes 0.735 after the sRGB step, which is 188, not 128. The Default view adds the ambient
     light and the highlight on top, so it reads a bit brighter there (about 192). A gray 128 texture reads 128 in the
     base color debug view: the texture turns it into linear and the last pass turns it back.
+    Once Cook-Torrance is in, the PBR diffuse gets the `(1 - F)` weight (about 0.96 here), so the
+    same check reads about 250 and 184.
 
 ---
 
@@ -493,26 +495,75 @@ the diffuse is still to be decided.
 
 ## Cook-Torrance (PBR)
 
-**What gets done.** The real physical diffuse and specular replace the stand-ins from the term skeleton.
+**What gets done.** The real physical diffuse and specular replace the stand-ins from the term
+skeleton. We follow the Khronos glTF Sample Viewer (its renderer code), so our PBR view can be
+compared with it. D and F are written as in the glTF 2.0 specification (Appendix B). The
+visibility term is the height-correlated one that the specification mentions as more accurate
+(Heitz 2014). The diffuse weight comes from the specification's blend of a non-metal and a metal,
+done the way the viewer does it, with the non-metal's own Fresnel.
 
-**Files.** `shaders/pbr_terms.glsl`. A sphere grid for the check in `src/renderer.cpp` or
-`main.cpp`.
+**Files.** `shaders/pbr_terms.glsl`. The sphere grid is built in `src/main.cpp`
+(`createSphereGridModel`), and `createSphere` in `src/mesh.cpp` takes a center and a radius for it.
 
-**How.** With `a = roughness * roughness` and roughness kept above about 0.04:
+**How.** With `a = roughness * roughness`, roughness clamped to at least 0.05 inside these terms
+only (the roughness debug view still shows the value as stored):
 
 1. Distribution, GGX: `D = a^2 / (pi * ((N.H)^2 * (a^2 - 1) + 1)^2)`
-2. Geometry, Smith with Schlick-GGX: `k = (roughness + 1)^2 / 8`,
-   `G1(x) = x / (x * (1 - k) + k)`, `G = G1(N.L) * G1(N.V)`
-3. Fresnel, Schlick: `F0 = mix(vec3(0.04), base, metallic)`,
-   `F = F0 + (1 - F0) * (1 - V.H)^5`
-4. `specularPhysical = D * G * F / (4 * N.L * N.V + 0.0001) * radiance * N.L * shadow`
-5. `diffusePhysical = (1 - F) * (1 - metallic) * base / pi * radiance * N.L * shadow`
+2. Visibility, the height-correlated Smith term (Heitz 2014, as in the Khronos viewer):
+   `Vis = 0.5 / (N.L * sqrt((N.V)^2 * (1 - a^2) + a^2) + N.V * sqrt((N.L)^2 * (1 - a^2) + a^2))`.
+   It is the geometry term G already divided by `4 * N.L * N.V`, so there is no separate divisor.
+   The shader multiplies N.L on before dividing (`0.5 * N.L / ...`) and returns 0 if the bottom
+   is 0, so tiny N.L and N.V cannot overflow.
+3. Fresnel, Schlick: `F = F0 + (1 - F0) * (1 - V.H)^5`. The specular uses
+   `F0 = mix(vec3(0.04), base, metallic)`.
+4. `specularPhysical = D * Vis * F * radiance * N.L * shadow`
+5. `diffusePhysical = (1 - F_dielectric) * (1 - metallic) * base / pi * radiance * N.L * shadow`,
+   where `F_dielectric` is the same Schlick formula with `F0 = 0.04`.
 
-   The factor `(1 - F) * (1 - metallic)` is what removes the diffuse color from metals and keeps
-   energy from being counted twice.
-6. Clamp N.L, N.V, N.H and V.H to 0 or above with `max`.
-7. Sphere grid for the check: 7 x 7 spheres, metallic 0 to 1 on one axis and roughness 0.05 to 1
-   on the other, set with the uniform factors and a white 1 x 1 texture.
+   `(1 - metallic)` removes the diffuse color from metals. `(1 - F_dielectric)` takes away the
+   light the paint reflects at its surface, so it is not counted twice. Using the mixed F here
+   instead would also take away what the metal part reflects: at metallic 0.5 that leaves about
+   half the diffuse it should have.
+6. No light when N.L is 0 or below, and no highlight when N.V is 0 or below. Clamp N.H and V.H
+   to 0 to 1, because `pow` of a negative number is undefined in GLSL. When L and V point exactly
+   opposite ways there is no half vector; the shader then uses a zero vector (V.H = 0). That only
+   happens when the light or the camera is behind the surface, where there is no highlight.
+7. The HDR picture stores half floats, which stop at 65504. A very smooth surface seen at a
+   grazing angle can go past that, so the specular is capped a little below it.
+8. Sphere grid for the check: "Sphere grid" in the Model menu. 7 x 7 spheres, metallic from 0
+   (bottom row) to 1 (top row) and roughness from 0 (left) to 1 (right), color from the Base color
+   swatch. To compare with the picture on LearnOpenGL's PBR lighting page, set the swatch to a
+   dark red, about 191, 0, 0 (the swatch is sRGB, and that is their linear albedo of
+   (0.5, 0, 0)). Their demo has four point lights, and its metallic and roughness stop at 6/7, so
+   the top row and right column differ a little.
+
+**Choices and why** (for the slides):
+
+- **Distribution.** GGX instead of the older Beckmann distribution. GGX has a longer tail, so
+  highlights fade out more softly, and Walter et al. found it fits measured materials better.
+- **Geometry term.** We use the height-correlated Smith form (Heitz 2014), which the Khronos
+  glTF Sample Viewer uses. The glTF specification writes the simpler separable Smith form and
+  names the height-correlated one as more accurate. LearnOpenGL uses the separable Smith with
+  Schlick-GGX and `k = (roughness + 1)^2 / 8`, a remap from Disney that Karis used in Unreal
+  Engine 4 for direct lights so rough surfaces do not get too bright. That version is 12 to 34
+  percent darker at middle angles and up to 80 percent darker near the edge of the sphere. Ours
+  matches the Khronos viewer we compare against, for the cost of two square roots.
+- **Fresnel.** Schlick's approximation instead of the exact Fresnel equations. For a non-metal
+  (index about 1.5) the two differ by up to about 3.6 points of reflectance near grazing angles,
+  and for metals the exact form needs a complex index of refraction per color, which glTF
+  materials do not store.
+- **Diffuse.** Lambert instead of Burley (Disney) or Oren-Nayar. Those are other fits to measured
+  data and are not clearly more accurate, and glTF uses Lambert too.
+- **Smallest roughness, 0.05.** At roughness 0 the highlight of a single light is one point of
+  endless brightness and the formulas divide by zero. 0.05 is the low end of LearnOpenGL's grid.
+- **Diffuse weight.** `(1 - F_dielectric) * (1 - metallic)` as in the Khronos viewer, instead of
+  the shorter `(1 - F) * (1 - metallic)` with the mixed F (LearnOpenGL, and the short form at the
+  end of glTF Appendix B.3.5). They are the same for non-metals and full metals, but in between
+  the short form also removes the metal's reflection from the paint: at metallic 0.5 it gives
+  about half the diffuse for a light base color.
+- **The two sides are almost, not exactly, equal.** With the `(1 - F)` weight a white sphere
+  facing the light reads about 250 in the Diffuse view instead of 255, and about 184 instead of
+  188 where it is half lit. The toon diffuse has no Fresnel, so there it stays at 255.
 
 ---
 
@@ -655,7 +706,16 @@ fresh clone without touching code.
 
 - LearnOpenGL, the PBR chapters (theory, lighting, IBL) and the shadow mapping chapter, for the
   Cook-Torrance, shadow map and cubemap formulas.
-- Brian Karis, "Real Shading in Unreal Engine 4" (2013), for `a = roughness^2` and the `k` in the
-  geometry term.
-- The glTF 2.0 specification, for the material layout and accessor structure.
+- Brian Karis, "Real Shading in Unreal Engine 4" (2013), for `a = roughness^2` and as background
+  for the `k` remap in LearnOpenGL's geometry term (we use Heitz's visibility term instead).
+- The glTF 2.0 specification, for the material layout and accessor structure, and its Appendix B
+  for the Cook-Torrance formulas.
+- Walter, Marschner, Li and Torrance, "Microfacet Models for Refraction through Rough Surfaces"
+  (2007), where GGX comes from.
+- Schlick, "An Inexpensive BRDF Model for Physically-based Rendering" (1994), for the Fresnel
+  approximation.
+- Eric Heitz, "Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs" (2014), for
+  the height-correlated visibility term.
+- Khronos glTF Sample Renderer (the code behind the glTF Sample Viewer), `brdf.glsl` and
+  `pbr.frag`, for how the visibility term and the diffuse weight are put together.
 - Krzysztof Narkowicz, "ACES Filmic Tone Mapping Curve" (2016), for the ACES fit.
