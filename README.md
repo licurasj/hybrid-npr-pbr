@@ -11,9 +11,9 @@ Final project for CSCI 420 Computer Graphics at the University of Southern Calif
 
 > **Status: early development.** The window, the control panel, an orbit camera and a test sphere
 > work. The sphere already uses the hybrid shader with its blend sliders and is shown as
-> PBR, Hybrid and NPR side by side. The PBR side has its real Cook-Torrance shading, while the
-> NPR side and the ambient light are still simple placeholder formulas. The build steps have
-> been checked on Windows; macOS and Linux are not tested yet.
+> PBR, Hybrid and NPR side by side. The PBR side has its real Cook-Torrance shading and the NPR
+> side its ramp diffuse and toon highlight, while the ambient light is still a simple placeholder.
+> The build steps have been checked on Windows; macOS and Linux are not tested yet.
 
 ## What it does
 
@@ -109,17 +109,23 @@ with OpenGL 4.1" means the driver does not offer OpenGL 4.1; updating it usually
 | `R` | Reload shaders from disk |
 | `Esc` | Quit |
 
-The control panel on the right shows the frame rate and OpenGL version, Reset camera and Reset light
-buttons, the light direction, intensity and ambient color, exposure and the tone curve with two
-ticks (see Tone mapping below), the base color, metallic, roughness and shininess, and the blend
+The control panel on the right shows the frame rate and OpenGL version, a Reset camera button,
+the light direction, intensity and ambient color, exposure and the tone curve with two
+ticks (see Tone mapping below), the base color, metallic and roughness, the NPR shading settings
+(see below), and the blend
 sliders (Shadow, Diffuse, Specular, Ambient, Tone mapping). A blend slider at 0 uses
 the physical version of that term and at 1 the stylized version; values in between mix the two. The
 small PBR and NPR labels above the sliders mark these two ends, and hovering a slider says the same.
 Each slider has a small number box next to it where you can type a value and press Enter.
+A control that differs from its default shows a small round arrow after its label; clicking it
+puts the default back, and so does double-clicking a slider bar. While anything in a section has
+changed, an arrow at the right end of its header resets that whole section, and a Reset all
+button next to the frame rate puts every setting and the camera back. "Changed" means changed in
+the digits the panel shows, and the color boxes always show red, green and blue from 0 to 255.
 The fifth blend slider, Tone mapping, works the same way for the screen step described below.
-The PBR diffuse and specular are real Cook-Torrance shading. The stylized terms and both ambient
-terms are still placeholders, for example the stylized diffuse is just two flat bands and the
-stylized highlight a Phong spot. The Shadow slider has no visible effect yet, because there are no
+The PBR diffuse and specular are real Cook-Torrance shading, and the NPR diffuse and specular are
+the ramp shading and toon highlight described below. Both ambient terms are still placeholders.
+The Shadow slider has no visible effect yet, because there are no
 shadows until the shadow map is added.
 The window opens maximized.
 
@@ -142,10 +148,24 @@ values and textures.
 "Sphere grid" shows 7 x 7 spheres for checking the PBR shading: metallic goes from 0 in the bottom
 row to 1 in the top row, and roughness from 0 on the left to 1 on the right.
 
-Which Material controls change what: on "Sphere" the Base color, Metallic, Roughness and Shininess
-controls all apply. On "Sphere grid" only Base color (every sphere takes it) and Shininess apply,
-because each sphere has its own metallic and roughness. A model file uses only Shininess; its
-color, metallic and roughness come from the file. Shininess only sizes the stylized highlight.
+Which Material controls change what: on "Sphere" the Base color, Metallic and Roughness controls
+all apply. On "Sphere grid" only Base color applies (every sphere takes it), because each sphere
+has its own metallic and roughness. A model file uses none of them; its color, metallic and
+roughness come from the file.
+
+### NPR shading
+
+The NPR side shades with a ramp: the brightness from the light picks a spot in a small gray image,
+so the light falls into flat bands. The Ramp menu under "NPR shading" picks two bands or three
+bands (the images are in `assets/ramps/`). The toon highlight is a flat spot whose size follows
+roughness through the same GGX shape the PBR highlight uses: small on smooth surfaces, large and
+dimmer on rough ones. Metals color it with their base color. Threshold moves its edge (higher makes the spot
+smaller; 0.5 puts the edge where the GGX shape has fallen to half its peak, 0 covers the whole lit
+side and 1 turns the highlight off) and Strength sets how bright it is (1 is as
+bright as a white surface facing the light). With "Follows ramp bands" ticked, a large highlight
+that reaches past a band edge dims to that band's brightness, like a painted toon highlight; off,
+it is one shape that ends only where the light stops reaching. Unlike the PBR side, NPR metals keep their base color
+in the diffuse.
 
 Each texture uses the UV set (first or second) and the wrap and filter settings the file gives it.
 Texture transforms (the glTF KHR_texture_transform extension) are not applied yet; the console
@@ -164,8 +184,7 @@ field of view from top to bottom, so the model still fits across each one.
 The Debug view menu under it shows one value on its own in every view: Default is the normal
 picture, then base color, metallic, roughness, the surface normal (as a color, x red, y green, z
 blue), shadow visibility (white everywhere until shadows are added), and the diffuse, specular or
-ambient term alone. Metallic and roughness are used by the PBR side; the stylized side does not
-use them yet.
+ambient term alone. Both sides use metallic and roughness: the NPR side only for its highlight.
 
 Each view also shows a faint grid on the floor under the model, with the X axis line in red and
 the Z axis line in blue, and a small set of axes in its bottom left corner: X red, Y green, Z blue.
@@ -178,7 +197,7 @@ program joins them in that order. If a file has an error, `R` keeps the old pict
 shows the file name and line.
 
 Planned: middle mouse drag to pan, `1` `2` `3` `4` as shortcuts for the view modes, and `Tab` to
-show or hide the panel. The panel will also get the ramp.
+show or hide the panel.
 
 ### Tone mapping
 
@@ -197,7 +216,7 @@ mapping slider in the Blend section shows the Hybrid view the way PBR is shown a
 is shown at 1. It only changes how the Hybrid view is shown, not its shading. While the tick is
 on, both ends are the same, so that slider changes nothing.
 
-The Exposure and tone curve on debug view tick decides whether a debug view gets this step too. It
+The Tone mapping on debug view tick decides whether a debug view gets this step too. It
 sets itself each time you pick a debug view: off for base color, metallic, roughness, normal and
 shadow, on for the diffuse, specular and ambient terms (which are light and can go above 1). You
 can change it afterwards. Metallic, roughness, normal and shadow are numbers rather than colors, so
@@ -245,10 +264,16 @@ Every model, texture and environment map is listed with its author, source and l
   13(3), 1994. https://doi.org/10.1111/1467-8659.1330233
 - Heitz, "Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs," Journal of
   Computer Graphics Techniques 3(2), 2014. https://jcgt.org/published/0003/02/03/
+- Lake, Marshall, Harris and Blackstein, "Stylized Rendering Techniques for Scalable Real-Time 3D
+  Animation," NPAR 2000. https://doi.org/10.1145/340916.340918
+- Mitchell, McTaggart and Green, "Shading in Valve's Source Engine," SIGGRAPH 2006 course
+  "Advanced Real-Time Rendering in 3D Graphics and Games." https://advances.realtimerendering.com/s2006/
 - Gooch, Gooch, Shirley and Cohen, "A Non-Photorealistic Lighting Model for Automatic Technical
   Illustration," SIGGRAPH 1998. https://doi.org/10.1145/280814.280950
 - Mitchell, Francke and Eng, "Illustrative Rendering in Team Fortress 2," NPAR 2007.
   https://www.cs.princeton.edu/courses/archive/fall07/cos597B/papers/mitchell-team-fortress.pdf
+- Gustavson, "Procedural Textures in GLSL," in Cozzi and Riccio (eds.), OpenGL Insights, chapter 7,
+  CRC Press, 2012.
 - kwandrus, "Non-Photorealistic GLSL Shaders."
   https://github.com/kwandrus/Non-Photorealistic-GLSL-Shaders
 - LZJU-1, "NPR-PBR," a Unity project that combines toon and PBR shading on a character. The closest

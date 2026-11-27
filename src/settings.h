@@ -43,7 +43,18 @@ struct Settings {
   glm::vec3 baseColor = glm::vec3(0.8f, 0.3f, 0.2f);
   float metallic = 0.0f;
   float roughness = 0.5f;
-  float shininess = 32.0f;
+
+  // Stylized shading
+  // Which ramp image the toon diffuse uses, in the order of the ramp menu:
+  // 0 two bands, 1 three bands
+  int rampChoice = 0;
+  // Where the edge of the toon highlight sits: 0.5 puts it where the GGX shape of the highlight
+  // has fallen to half its peak, a higher value makes the spot smaller
+  float highlightThreshold = 0.5f;
+  // Brightness of the toon highlight, 1 is as bright as a white surface facing the light
+  float highlightStrength = 1.0f;
+  // Whether the toon highlight is dimmed by the ramp band it falls in
+  bool highlightFollowsRamp = false;
 
   // Blend weights for shadow, diffuse, specular and ambient
   // 0 is physical and 1 is stylized.

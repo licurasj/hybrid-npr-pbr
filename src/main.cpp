@@ -43,6 +43,10 @@ std::string assetFolder = ASSET_DIR;
 // The fragment shader is joined from these files in this order
 std::vector<std::string> fragmentFiles = { "common.glsl", "pbr_terms.glsl", "npr_terms.glsl", "hybrid_main.glsl" };
 
+// Ramp images in assets/ramps, in the same order as the ramp menu in the panel
+const int RAMP_COUNT = 2;
+const char* RAMP_FILES[RAMP_COUNT] = { "two-band.png", "three-band.png" };
+
 
 // Function declarations
 
@@ -55,6 +59,10 @@ void scrollCallback(GLFWwindow* window, double xOffset, double yOffset);
 // Shaders
 // Build the shader programs again and keep the old one of each that fails
 void reloadShaders(GLuint& program, GLuint& lineProgram, GLuint& toneMapProgram);
+
+// Textures
+// Load a ramp image of the stylized diffuse, or a white one if the file cannot be read
+GLuint loadRampTexture(const std::string& path);
 
 // Models
 // The sphere as a model with one part, drawn with white textures and the panel's material
@@ -151,6 +159,31 @@ void reloadShaders(GLuint& program, GLuint& lineProgram, GLuint& toneMapProgram)
     toneMapProgram = newToneMapProgram;
     std::printf("Tone mapping shaders reloaded\n");
   }
+}
+
+
+// Textures
+
+// Load a ramp image of the stylized diffuse
+// The ramp is read with GL_NEAREST so the bands keep hard edges, and clamped at its ends so the
+// lit end never blends into the dark end. It has no mipmaps, they would blur the bands far away.
+// The image holds colors painted by eye, so it is read as sRGB like a base color texture.
+GLuint loadRampTexture(const std::string& path) {
+  TextureSettings rampSettings;
+  rampSettings.wrapS = GL_CLAMP_TO_EDGE;
+  rampSettings.wrapT = GL_CLAMP_TO_EDGE;
+  rampSettings.minFilter = GL_NEAREST;
+  rampSettings.magFilter = GL_NEAREST;
+  rampSettings.srgb = true;
+  rampSettings.mipmaps = false;
+
+  GLuint texture = loadTextureFile(path, rampSettings);
+  if (texture == 0) {
+    // A missing ramp leaves the stylized diffuse lit evenly instead of black
+    std::printf("The stylized diffuse uses a plain white ramp instead\n");
+    texture = createWhiteTexture();
+  }
+  return texture;
 }
 
 
@@ -341,6 +374,12 @@ int main(int argc, char** argv) {
     settings.modelChoice = (int)modelPaths.size() - 1;
   }
 
+  // The ramp images of the stylized diffuse, in the order of the ramp menu
+  GLuint rampTextures[RAMP_COUNT];
+  for (int i = 0; i < RAMP_COUNT; i++) {
+    rampTextures[i] = loadRampTexture(assetFolder + "ramps/" + RAMP_FILES[i]);
+  }
+
   // The sphere and the sphere grid stay loaded the whole time, a model file only while it is shown
   Model sphere = createSphereModel();
   Model sphereGrid = createSphereGridModel();
@@ -480,7 +519,8 @@ int main(int argc, char** argv) {
     } else if (shownChoice == MODEL_SPHERE_GRID) {
       shownModel = &sphereGrid;
     }
-    drawScene(program, lineProgram, *shownModel, grid, axes, camera, settings, sceneWidth, height);
+    drawScene(program, lineProgram, *shownModel, rampTextures[settings.rampChoice], grid, axes, camera,
+              settings, sceneWidth, height);
 
     // Draw the HDR picture onto the window with the tone mapping pass
     // It treats each sample on its own and averages them there.
@@ -500,6 +540,7 @@ int main(int argc, char** argv) {
   deleteModel(sphere);
   deleteModel(sphereGrid);
   deleteModel(fileModel);
+  glDeleteTextures(RAMP_COUNT, rampTextures);
   deleteLines(grid);
   deleteLines(axes);
   deleteHdrTarget(hdrTarget);

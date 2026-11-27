@@ -31,20 +31,6 @@ vec3 baseReflectance(Surface s) {
   return mix(vec3(0.04), s.baseColor, s.metallic);
 }
 
-// Half vector, the direction halfway between the light and the camera
-// When the two point almost exactly opposite ways their sum has almost no length, there is no
-// clear halfway direction and normalize would divide by zero or by rounding noise. Then a zero
-// vector is returned, so V.H is 0, which is what V.H tends to as the two turn opposite. This only
-// happens when the light or the camera is behind the surface or right at its edge, where the
-// specular is zero or tiny.
-vec3 halfVector(Surface s, Light l) {
-  vec3 sum = l.L + s.V;
-  if (dot(sum, sum) < 1e-12) {
-    return vec3(0.0);
-  }
-  return normalize(sum);
-}
-
 // Schlick's Fresnel: more light is reflected at grazing angles
 // F = F0 + (1 - F0) (1 - V.H)^5
 vec3 fresnelSchlick(vec3 F0, float VdotH) {

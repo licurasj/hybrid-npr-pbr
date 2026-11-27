@@ -19,9 +19,13 @@ struct TextureSettings {
   // GPU turns them into linear values when the shader reads them. Textures that hold data
   // (metallic-roughness, normal, occlusion) stay false and are read as they are.
   bool srgb = false;
+
+  // Smaller copies of the image for when the texture is drawn far away. A texture without them
+  // needs a min filter that does not use them, GL_NEAREST or GL_LINEAR.
+  bool mipmaps = true;
 };
 
-// All textures are stored as 8 bits per channel RGBA, with mipmaps.
+// All textures are stored as 8 bits per channel RGBA.
 // Images are not flipped: their first row goes into the first row of the texture.
 // Each function returns 0 if the image could not be read, after printing why.
 

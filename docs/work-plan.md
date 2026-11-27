@@ -13,9 +13,8 @@ Please double-check these on Brightspace.
 | When | What |
 |---|---|
 | Sat Nov 21 | Code demo: a short zip showing we've started |
-| Sat Nov 28 | Report outline |
 | Thu Dec 3, in class | Final demo |
-| Sat Dec 5 | Final turn-in: code and report |
+| During finals, date to be confirmed | Final turn-in: code and report |
 
 ## How we split the work
 
@@ -44,7 +43,7 @@ Finished and take your name off again.
 | HDR and color | | Finished |
 | glTF loading | | Finished |
 | Test materials | | Not started |
-| Ramp shading and stylized highlight | | Not started |
+| Ramp shading and stylized highlight | | Finished |
 | Cook-Torrance | | Finished |
 | Shadow map | | Not started |
 | Shadow in the ramp | | Not started |

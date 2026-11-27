@@ -17,8 +17,10 @@ GLuint createTexture(const unsigned char* pixels, int width, int height, const T
   glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 
   // Smaller copies of the image for when the texture is far away
-  // They are made every time, even if the filter below does not use them.
-  glGenerateMipmap(GL_TEXTURE_2D);
+  // They are made whenever the settings ask for them, even if the filter below does not use them.
+  if (settings.mipmaps) {
+    glGenerateMipmap(GL_TEXTURE_2D);
+  }
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, settings.minFilter);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, settings.magFilter);
 

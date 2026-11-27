@@ -54,11 +54,15 @@ static void setSharedUniforms(GLuint program, const Model& model, const Camera& 
   setUniform(program, "uLightRadiance", glm::vec3(settings.lightIntensity));
   // The ambient color is picked by eye, so it is turned into a linear value like the base color
   setUniform(program, "uAmbientColor", srgbToLinear(settings.ambientColor));
-  setUniform(program, "uShininess", settings.shininess);
+  setUniform(program, "uHighlightThreshold", settings.highlightThreshold);
+  setUniform(program, "uHighlightStrength", settings.highlightStrength);
+  setUniform(program, "uHighlightFollowsRamp", settings.highlightFollowsRamp ? 1 : 0);
 
   // Each texture in the shader reads from its own texture unit
+  // The units are set every frame, so a program made again by R gets them too.
   setUniform(program, "uBaseColorTexture", 0);
   setUniform(program, "uMetallicRoughnessTexture", 1);
+  setUniform(program, "uRampTexture", 5);
 
   // Every strip shows the same debug view
   setUniform(program, "uDebugView", settings.debugView);
@@ -197,14 +201,20 @@ static void drawAxisIndicator(GLuint lineProgram, const LineMesh& axes, const Ca
 
 
 // Draw the scene once per strip of the current view mode
-void drawScene(GLuint program, GLuint lineProgram, const Model& model, const LineMesh& grid,
-               const LineMesh& axes, const Camera& camera, const Settings& settings,
-               int sceneWidth, int sceneHeight) {
+void drawScene(GLuint program, GLuint lineProgram, const Model& model, GLuint rampTexture,
+               const LineMesh& grid, const LineMesh& axes, const Camera& camera,
+               const Settings& settings, int sceneWidth, int sceneHeight) {
   const int* views = VIEW_MODES[settings.viewMode];
   int count = countViews(views);
 
   glUseProgram(program);
   setSharedUniforms(program, model, camera, settings);
+
+  // The ramp is the same for every part of the model, so it is bound once on its own unit
+  // Unit 0 is left active again, which is what the panel code expects.
+  glActiveTexture(GL_TEXTURE5);
+  glBindTexture(GL_TEXTURE_2D, rampTexture);
+  glActiveTexture(GL_TEXTURE0);
 
   // The scissor test keeps each strip from drawing into its neighbours
   glEnable(GL_SCISSOR_TEST);

@@ -269,7 +269,7 @@ the curved scale screens and image files use.
       converts its Base Color view the same way.
     - Metallic, roughness, normal and shadow are data, so they never get the sRGB step and show
       their stored values. That keeps them matching the Khronos viewer.
-    - The "Exposure and tone curve on debug view" tick decides whether a debug view also gets
+    - The "Tone mapping on debug view" tick decides whether a debug view also gets
       exposure and the curve. It sets itself each time the Debug view menu changes: off for base
       color, metallic, roughness, normal and shadow, on for the diffuse, specular and ambient
       terms, which are light and can go above 1. You can change it afterwards. With it on, the
@@ -460,36 +460,119 @@ the sphere from a menu.
 
 ## Ramp diffuse and stylized highlight (NPR)
 
-**What gets done.** The real stylized diffuse and specular replace the stand-ins from the term skeleton.
+**What gets done.** The real stylized diffuse and specular replace the stand-ins from the term
+skeleton. The diffuse falls into flat color bands read from a ramp image, and the highlight is a
+flat spot whose size follows roughness through the same GGX shape the PBR highlight uses.
 
-**Files.** `shaders/npr_terms.glsl`, `src/texture.cpp` (ramp), `src/settings.h`, `src/ui.cpp`,
-`assets/ramps/`.
+**Files.** `shaders/npr_terms.glsl`, `src/main.cpp` (loads the ramps), `src/texture.h` and
+`src/texture.cpp` (a texture can skip mipmaps), `src/renderer.cpp` (binds the ramp),
+`src/settings.h`, `src/ui.cpp`, `assets/ramps/`, `assets/CREDITS.md`.
 
 **How.**
 
-1. Ramp texture: a small image, for example 256 x 1. Internal format `GL_SRGB8_ALPHA8`, wrap
-   `GL_CLAMP_TO_EDGE`, no mipmaps. `GL_NEAREST` gives hard bands, `GL_LINEAR` slightly soft ones.
-2. `diffuseStylized`:
-   - `t = (dot(N, L) * 0.5 + 0.5) * shadow`
-   - `rampColor = texture(uRamp, vec2(t, 0.5)).rgb`
-   - `result = s.baseColor / pi * rampColor * l.radiance`
+1. Ramp images: `assets/ramps/two-band.png` (0.3, then 1.0 from t = 0.55) and
+   `assets/ramps/three-band.png` (0.25, then 0.6 from t = 0.55, then 1.0 from t = 0.75). Both are
+   256 x 1 gray PNGs. The numbers are linear brightness, stored sRGB-encoded in the image (bytes
+   149 and 255; 137, 203 and 255), so the shader reads back 0.3 and so on.
+2. Ramp texture: loaded through `loadTextureFile` with `GL_SRGB8_ALPHA8` (`srgb = true`), wrap
+   `GL_CLAMP_TO_EDGE` on both axes, `GL_NEAREST` for both filters, and no mipmaps
+   (`mipmaps = false`). It is bound on texture unit 5 every frame, together with the sampler
+   uniform `uRampTexture`, so a shader reload with `R` keeps it. A ramp file that cannot be read
+   is replaced by a white texture and the console says so.
+3. `diffuseStylized` (Lake et al. 2000; the `N.L * 0.5 + 0.5` remap is Valve's Half Lambert,
+   used this way in Team Fortress 2):
+   - `t = (dot(N, L) * 0.5 + 0.5) * shadow`, with N.L not clamped, so the side facing away from
+     the light uses the part of the ramp below 0.5
+   - `rampLookup(t) = texture(uRampTexture, vec2(t, 0.5)).rgb`
+   - `result = base / pi * rampLookup(t) * radiance`
 
-   The remap puts N.L = 0 (the edge between lit and unlit) at t = 0.5.
-3. `specularStylized`, the GGX term divided by its own peak:
-   - `a = roughness * roughness`, kept above about 0.02
+   The base color is used as it is, also for metals. The shadow only changes `t`, which is what
+   Shadow in the ramp needs later.
+4. `specularStylized`, the GGX term (Walter et al. 2007, `a = roughness^2` as in glTF) divided by
+   its own peak, which is `1 / (pi * a^2)` at N.H = 1:
+   - `r = max(roughness, 0.2)`, `a = r * r` (this floor is only used here)
    - `d = (N.H)^2 * (a^2 - 1) + 1`
-   - `ratio = a^4 / d^2`. This is 1 at the center of the highlight and falls toward 0.
-   - `edge = fwidth(ratio)`, `mask = smoothstep(T - edge, T + edge, ratio)` with threshold
-     `T = uHighlightThreshold`. `fwidth` keeps the edge one pixel soft, so it is not jagged.
-   - `tint = mix(vec3(1), s.baseColor, s.metallic)`
-   - `result = mask * uHighlightStrength * tint * l.radiance * step(0.0, dot(N, L)) * shadow`
-4. Why the highlight grows with roughness: the mask is on where
-   `(N.H)^2 >= (1 - a^2 / sqrt(T)) / (1 - a^2)`. A larger `a` lowers the right side.
-5. Sliders: threshold, strength, ramp choice.
+   - `ratio = min(a^4 / d^2, 1)`. This is 1 at the center of the highlight and falls toward 0.
+     It can not go above 1, but rounding in `a^2 - 1` and the `+ 1` can push it just over, which
+     would leave a tiny dot at Threshold 1, so it is kept at 1 at most.
+   - `w = max(0.7 * length(vec2(dFdx(ratio), dFdy(ratio))), 0.0001)`,
+     `mask = smoothstep(T - 2w(1 - T), T + 2wT, ratio)` with `T = uHighlightThreshold`. At
+     T = 0.5 this is `smoothstep(T - w, T + w, ratio)`, Gustavson's `aastep`: `dFdx` and `dFdy` say how much `ratio` changes to the next pixel across and down,
+     so the edge is about 1.4 pixels soft in every direction and not jagged. The small minimum is
+     there because `smoothstep` is undefined when both edges are equal, which happens at
+     roughness 1, where `ratio` is 1 everywhere.
+   - `tint = mix(vec3(1), base, metallic)`
+   - `fade = smoothstep(0, 2 * wNL, N.L)`, with `wNL` worked out from N.L the same way as `w`.
+     It is 0 where N.L <= 0 (light behind the surface) and fades in over about 1.4 pixels, so the
+     highlight does not end in a jagged arc where it meets the dark side.
+   - `result = mask * fade * uHighlightStrength * (1 - roughness) / pi * tint * radiance * shadow`
+   - If "Follows ramp bands" is ticked, `result *= rampLookup(t)`, the same ramp value the
+     diffuse uses at this pixel.
+   - `dFdx` and `dFdy` are undefined inside an `if` that only some pixels take, so they come first.
+     The only `if` is on the "Follows ramp bands" uniform, which is the same for every pixel.
+5. Why the highlight grows with roughness: the mask is on where
+   `(N.H)^2 >= (1 - a^2 / sqrt(T)) / (1 - a^2)`. A larger `a` lowers the right side. With
+   T = 0.5 the edge sits this far from the center (angle between N and H): 0.37 degrees at
+   roughness 0.1 (without the floor, so never used), 1.5 at the 0.2 floor (the smallest spot),
+   3.3 at 0.3, 9.6 at 0.5, 21 at 0.7 and 63 at 0.9. At roughness 1 the mask covers the whole lit
+   side, but the brightness `(1 - roughness)` is 0 there, so nothing shows.
+6. Panel, under "NPR shading": Ramp (Two bands, Three bands), and for the highlight Threshold
+   (default 0.5), Strength (default 1) and the "Follows ramp bands" tick (default off). Like every
+   control in the panel, each has a reset arrow while it differs from its default, and while
+   anything in the section differs, the section header has one that resets the whole section.
 
-**Open points.** At roughness above about 0.7 the highlight covers much of the sphere. If it looks
-wrong, scale the strength by `(1 - roughness)`. Whether a stylized metal shows its base color in
-the diffuse is still to be decided.
+**Choices and why** (for the slides):
+
+- **Ramp image instead of bands in code.** Rounding N.L to steps or cutting it with smoothstep
+  fixes the bands in the shader. With an image, the number, position and color of the bands
+  change by swapping a file. This is the method of Lake et al. and of Team Fortress 2.
+- **`N.L * 0.5 + 0.5` instead of `max(N.L, 0)`.** Lake et al. clamp N.L, which gives the whole
+  dark side one value, so no band can sit past the line between light and dark and a cast shadow
+  could not look different from the dark side. The remap keeps that line at t = 0.5. Valve squares
+  it (Half Lambert), which bends the bands toward the light; we don't need that, the image can put
+  the bands anywhere.
+- **Times base / pi times radiance.** Team Fortress 2 also multiplies its ramp result by the
+  albedo. With the same base / pi factor as the PBR diffuse, a white ramp on a non-metal facing
+  the light is as bright as the PBR side (within about 4 percent), so the Hybrid view blends two
+  pictures of about the same brightness, and textures show through. Metals differ: the PBR
+  diffuse of a metal is 0, the toon one is not.
+- **Band values and edges.** Our own picks. The first edge at t = 0.55 (N.L = 0.1, about 84
+  degrees from the light) sits a little inside the PBR terminator, so the shadow map's unreliable
+  zone later falls in the dark band. Gray ramps keep the base color readable.
+- **Nearest, clamp to edge, no mipmaps.** Nearest keeps each edge one texel sharp; linear would
+  soften it a little. Repeat wrap would let the lit end bleed into the dark end near t = 1, and
+  mipmaps would blur the bands far away.
+- **Metals keep their base color in the toon diffuse.** Physically a metal has no diffuse color,
+  but a black toon metal looks wrong. The metal look comes from the tinted highlight instead.
+- **GGX over its peak, cut at a threshold.** The usual toon highlight cuts Blinn-Phong, whose size
+  follows a shininess number and not our roughness. Dividing GGX by its peak is our own idea. At
+  T = 0.5 the toon edge is where this GGX shape has fallen to half its peak, at every roughness,
+  so the toon spot follows the same GGX shape as the PBR highlight. The two are not exactly the
+  same size: the PBR highlight also has Fresnel, the visibility term and N.L, which change it
+  near grazing light, and the toon one has the 0.2 floor.
+- **Roughness floor 0.2 in the toon highlight.** Below about 0.15 the spot would be smaller than a
+  pixel. Smooth toon highlights come out a little larger than the PBR ones.
+- **Brightness `(1 - roughness)`.** Our own rule. Without it a fully rough sphere turns white over
+  its whole lit half. Rougher is dimmer, like on the PBR side, though much more gently.
+- **Tint `mix(1, base, metallic)`.** Like the PBR side's F0, it turns into the base color at the
+  metal end: gold gets a gold highlight, plastic a white one. The PBR F0 starts from 0.04 for
+  non-metals, the toon tint from white, so in between they differ (white base, metallic 0.5:
+  F0 0.52, tint 1).
+- **Soft edge with Gustavson's `aastep`.** A hard `step` gives jagged, crawling edges, and a
+  fixed soft width gets blurry up close. The common shortcut `fwidth` (`|dFdx| + |dFdy|`) gives
+  edges 2 pixels wide on straight edges and up to 2.8 on diagonals; the length of the two
+  derivatives gives about 1.4 pixels in every direction, for one square root per pixel.
+- **The soft window slides with the threshold.** Our own construction. With a centered window,
+  Threshold 1 still left a faint one-pixel dot at the peak and Threshold 0 left a soft glow on
+  smooth surfaces. Sliding the window keeps it centered at 0.5, so 1 means no highlight and 0
+  means the whole lit side, flat.
+- **"Follows ramp bands", off by default.** Our own switch. Off, the spot is one clean shape that
+  ends only at N.L = 0, the same shape as the PBR highlight, so the Hybrid mix stays consistent.
+  On, a large spot that reaches past a band edge dims to that band's value, like painted toon
+  art, which leaves a step inside the spot at each band edge. It only matters for large spots
+  (roughness about 0.6 and up) with the light from the side.
+- **Fade at the dark side.** The same soft edge at N.L = 0 instead of a hard cut. The PBR side
+  also goes smoothly to 0 there, through its N.L factor.
 
 ---
 
@@ -711,11 +794,18 @@ fresh clone without touching code.
 - The glTF 2.0 specification, for the material layout and accessor structure, and its Appendix B
   for the Cook-Torrance formulas.
 - Walter, Marschner, Li and Torrance, "Microfacet Models for Refraction through Rough Surfaces"
-  (2007), where GGX comes from.
+  (2007), where GGX comes from. The toon highlight uses it too.
 - Schlick, "An Inexpensive BRDF Model for Physically-based Rendering" (1994), for the Fresnel
   approximation.
 - Eric Heitz, "Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs" (2014), for
   the height-correlated visibility term.
 - Khronos glTF Sample Renderer (the code behind the glTF Sample Viewer), `brdf.glsl` and
   `pbr.frag`, for how the visibility term and the diffuse weight are put together.
+- Lake, Marshall, Harris and Blackstein, "Stylized Rendering Techniques for Scalable Real-Time 3D
+  Animation" (NPAR 2000), for the ramp lookup of the toon diffuse.
+- Mitchell, McTaggart and Green, "Shading in Valve's Source Engine" (SIGGRAPH 2006 course), for
+  Half Lambert, and Mitchell, Francke and Eng, "Illustrative Rendering in Team Fortress 2" (NPAR
+  2007), for the same remap into a ramp, multiplied by the albedo.
+- Stefan Gustavson, "Procedural Textures in GLSL" (OpenGL Insights, chapter 7, 2012), for the
+  `aastep` soft edge of the toon highlight.
 - Krzysztof Narkowicz, "ACES Filmic Tone Mapping Curve" (2016), for the ACES fit.

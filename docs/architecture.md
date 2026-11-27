@@ -22,7 +22,7 @@ material class hierarchy.
 | Module | Responsible for | Hands on |
 |---|---|---|
 | `main.cpp` | Creates the window, loads everything once, runs the frame loop | Calls the modules below in order |
-| `settings.h` | One plain struct with every value the UI can change: blend weights (four terms plus tone mapping), light direction, exposure, tone curve and the two tone mapping ticks, ramp choice, view mode, debug view | Read by the renderer, written by the UI |
+| `settings.h` | One plain struct with every value the UI can change: blend weights (four terms plus tone mapping), light direction, exposure, tone curve and the two tone mapping ticks, ramp choice and toon highlight threshold, strength and the follows-ramp tick, view mode, debug view | Read by the renderer, written by the UI |
 | `camera` | Orbit camera: turns mouse input into a view matrix and a projection matrix | Two matrices to the renderer |
 | `shader` | Reads GLSL files, joins them, compiles, links, reports errors, sets uniforms, reloads on request | A program id |
 | `texture` | Loads images with stb_image and creates GPU textures with the right color space. Builds the environment cubemap | Texture ids |
@@ -158,7 +158,7 @@ draw with amount 0 covers the area under the panel.
 
 All lighting math happens in linear color. Three places enforce this, and nowhere else touches it:
 
-1. **Loading.** Base color and emissive textures (later the ramp too) are created with an sRGB
+1. **Loading.** Base color and emissive textures and the ramp are created with an sRGB
    format, so the GPU converts them to linear when the shader reads them. Metallic-roughness,
    normal and occlusion textures hold data, not colors, and are created with a plain format. The
    environment map will be a float texture that is already linear. Colors we pick by eye, the
@@ -240,8 +240,8 @@ struct Light {
 | Term | Physical version, in `pbr_terms.glsl` | Stylized version, in `npr_terms.glsl` |
 |---|---|---|
 | Shadow: `float shadow*(float visibility)` | Returns the filtered shadow map result as is: a soft edge | Sharpens it into a hard edge with an adjustable threshold |
-| Diffuse: `vec3 diffuse*(Surface s, Light l, float shadow)` | Lambert: base color / pi, times N.L, times shadow, times (1 - F)(1 - metallic) with the non-metal F (F0 = 0.04), so metals have none | Looks up the ramp at `(N.L * 0.5 + 0.5) * shadow`. The shadow moves the lookup position. It is not multiplied on afterward |
-| Specular: `vec3 specular*(Surface s, Light l, float shadow)` | Cook-Torrance as in the Khronos glTF Sample Viewer: GGX, height-correlated Smith visibility, Schlick Fresnel, times N.L, times shadow | The GGX term divided by its own peak, cut at a threshold. The result is a flat highlight whose size grows with roughness |
+| Diffuse: `vec3 diffuse*(Surface s, Light l, float shadow)` | Lambert: base color / pi, times N.L, times shadow, times (1 - F)(1 - metallic) with the non-metal F (F0 = 0.04), so metals have none | Base color / pi times the ramp looked up at `(N.L * 0.5 + 0.5) * shadow`, times radiance. The shadow moves the lookup position. It is not multiplied on afterward. Metals keep their base color here |
+| Specular: `vec3 specular*(Surface s, Light l, float shadow)` | Cook-Torrance as in the Khronos glTF Sample Viewer: GGX, height-correlated Smith visibility, Schlick Fresnel, times N.L, times shadow | The GGX term divided by its own peak, cut at a threshold with a soft edge about 1.4 pixels wide, and faded out where it meets the dark side. The result is a flat highlight whose size grows with roughness and whose brightness fades as roughness grows. Metals tint it with their base color |
 | Ambient: `vec3 ambient*(Surface s)` | Environment lighting: a very blurred cubemap sample along N for diffuse, plus a cubemap sample along the reflection direction at a mip level chosen by roughness | A flat ambient color times the base color |
 
 The shadow map lookup itself (the depth comparison and the 3 x 3 filtering) is shared code in

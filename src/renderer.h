@@ -23,10 +23,11 @@ glm::mat4 fitModelMatrix(const Model& model);
 // The area is split into one strip per view of the current view mode,
 // and every strip uses the same camera and light.
 // Every mesh and material pair of the model is drawn in every strip.
+// rampTexture is the ramp image the stylized diffuse reads.
 // The line program draws the floor grid and the axis indicator in every strip.
-void drawScene(GLuint program, GLuint lineProgram, const Model& model, const LineMesh& grid,
-               const LineMesh& axes, const Camera& camera, const Settings& settings,
-               int sceneWidth, int sceneHeight);
+void drawScene(GLuint program, GLuint lineProgram, const Model& model, GLuint rampTexture,
+               const LineMesh& grid, const LineMesh& axes, const Camera& camera,
+               const Settings& settings, int sceneWidth, int sceneHeight);
 
 // Draw the HDR picture onto the window with exposure, the tone curve and the sRGB step
 // hdrImage is the multisample HDR color texture and sampleCount its number of samples per pixel.

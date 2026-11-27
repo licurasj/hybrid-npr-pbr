@@ -39,7 +39,6 @@ uniform int uMetallicRoughnessUVSet;
 uniform vec3 uBaseColor;
 uniform float uMetallic;
 uniform float uRoughness;
-uniform float uShininess;
 
 // Which value to show on its own, 0 is the normal lit picture
 uniform int uDebugView;
@@ -51,13 +50,17 @@ uniform float uWeightSpecular;
 uniform float uWeightAmbient;
 
 
-// Phong highlight used by the stylized specular stand-in
-// It goes away once the stylized specular is written.
-float phongHighlight(Surface s, Light l) {
-  // No highlight on the side facing away from the light
-  if (dot(s.N, l.L) <= 0.0) {
-    return 0.0;
+// Half vector, the direction halfway between the light and the camera
+// Both sides use it for their highlight.
+// When the two point almost exactly opposite ways their sum has almost no length, there is no
+// clear halfway direction and normalize would divide by zero or by rounding noise. Then a zero
+// vector is returned, so V.H is 0, which is what V.H tends to as the two turn opposite. This only
+// happens when the light or the camera is behind the surface or right at its edge, where the
+// specular is zero or tiny.
+vec3 halfVector(Surface s, Light l) {
+  vec3 sum = l.L + s.V;
+  if (dot(sum, sum) < 1e-12) {
+    return vec3(0.0);
   }
-  vec3 R = reflect(-l.L, s.N);
-  return pow(max(dot(R, s.V), 0.0), uShininess);
+  return normalize(sum);
 }
