@@ -98,17 +98,19 @@ static void applyPanelTheme() {
 
 
 // Names in the debug view menu, in the order the shader checks them
+// Kept in step by hand with the uDebugView checks in shaders/hybrid_main.glsl and the DEBUG_
+// numbers in renderer.cpp (and the 8 below): a new view changes all three.
 static const char* const DEBUG_VIEW_NAMES[] = {
-  "Default", "Base color", "Metallic", "Roughness", "Normal",
-  "Shadow visibility", "Diffuse only", "Specular only", "Ambient only",
+  "Default", "Base color", "Emissive", "Metallic", "Roughness", "Normal", "Occlusion",
+  "Shadow visibility", "Diffuse only", "Specular only", "Ambient only", "Reflections only",
 };
 
 
 // Whether a debug view gets exposure and the tone curve when it is picked
-// Base color, metallic, roughness, normal and shadow are shown as they are stored,
-// while the diffuse, specular and ambient terms are light that can go above 1.
+// Base color, emissive, metallic, roughness, normal, occlusion and shadow are shown as they are stored,
+// while the diffuse, specular, ambient and reflection terms are light that can go above 1.
 static bool debugViewWantsToneMapping(int debugView) {
-  return debugView == 0 || debugView >= 6;
+  return debugView == 0 || debugView >= 8;
 }
 
 
@@ -357,6 +359,13 @@ static bool toneMappingChanged(const Settings& s, const Settings& d) {
          s.debugViewToneMapping != debugViewWantsToneMapping(s.debugView);
 }
 
+static bool environmentChanged(const Settings& s, const Settings& d) {
+  return s.environmentChoice != d.environmentChoice || s.backgroundChoice != d.backgroundChoice ||
+         sliderChanged(s.environmentRotation, d.environmentRotation, ANGLE_FORMAT) ||
+         sliderChanged(s.environmentIntensity, d.environmentIntensity, VALUE_FORMAT) ||
+         s.environmentMethod != d.environmentMethod;
+}
+
 static bool materialChanged(const Settings& s, const Settings& d) {
   return colorChanged(s.baseColor, d.baseColor) ||
          sliderChanged(s.metallic, d.metallic, VALUE_FORMAT) ||
@@ -371,7 +380,7 @@ static bool nprChanged(const Settings& s, const Settings& d) {
 }
 
 static bool blendChanged(const Settings& s, const Settings& d) {
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < WEIGHT_COUNT; i++) {
     if (sliderChanged(s.weights[i], d.weights[i], VALUE_FORMAT)) {
       return true;
     }
@@ -403,6 +412,14 @@ static void resetToneMapping(Settings& s, const Settings& d) {
   s.debugViewToneMapping = debugViewWantsToneMapping(s.debugView);
 }
 
+static void resetEnvironment(Settings& s, const Settings& d) {
+  s.environmentChoice = d.environmentChoice;
+  s.backgroundChoice = d.backgroundChoice;
+  s.environmentRotation = d.environmentRotation;
+  s.environmentIntensity = d.environmentIntensity;
+  s.environmentMethod = d.environmentMethod;
+}
+
 static void resetMaterial(Settings& s, const Settings& d) {
   s.baseColor = d.baseColor;
   s.metallic = d.metallic;
@@ -417,7 +434,7 @@ static void resetNpr(Settings& s, const Settings& d) {
 }
 
 static void resetBlend(Settings& s, const Settings& d) {
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < WEIGHT_COUNT; i++) {
     s.weights[i] = d.weights[i];
   }
   s.toneMappingWeight = d.toneMappingWeight;
@@ -470,6 +487,7 @@ void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>&
   // The text is lined up with a button even when there is none, so the row keeps its height.
   bool anythingChanged = viewChanged(settings, defaults) || modelChanged(settings, defaults) ||
                          cameraChanged(camera) || lightChanged(settings, defaults) ||
+                         environmentChanged(settings, defaults) ||
                          toneMappingChanged(settings, defaults) ||
                          materialChanged(settings, defaults) || nprChanged(settings, defaults) ||
                          blendChanged(settings, defaults);
@@ -486,6 +504,7 @@ void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>&
       settings.modelChoice = defaults.modelChoice;
       camera = Camera();
       resetLight(settings, defaults);
+      resetEnvironment(settings, defaults);
       resetToneMapping(settings, defaults);
       resetMaterial(settings, defaults);
       resetNpr(settings, defaults);
@@ -579,6 +598,40 @@ void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>&
                   VALUE_FORMAT);
     colorBox("Ambient color", &settings.ambientColor);
     resetArrow("Ambient color", &settings.ambientColor, defaults.ambientColor);
+  }
+
+  // The environment image lights the PBR side from all around and is shown behind the model
+  // Picking another image only changes the choice, and the main loop then builds its cubemap.
+  open = sectionHeader("Environment", environmentChanged(settings, defaults), &reset);
+  if (reset) {
+    resetEnvironment(settings, defaults);
+  }
+  if (open) {
+    ImGui::Combo("Environment", &settings.environmentChoice,
+                 "Partly cloudy\0Overcast\0Small studio\0Photo studio\0Sunset\0");
+    resetArrow("Environment", &settings.environmentChoice, defaults.environmentChoice);
+
+    // The order matches BACKGROUND_SKY, BACKGROUND_BLURRED_SKY and BACKGROUND_PLAIN
+    ImGui::Combo("Background", &settings.backgroundChoice, "Sky\0Blurred sky\0Plain\0");
+    ImGui::SetItemTooltip("What is drawn behind the model in every view.\n"
+                          "The environment lights the model either way. Debug views use Plain");
+    resetArrow("Background", &settings.backgroundChoice, defaults.backgroundChoice);
+
+    // The Light section has an Intensity slider too, so this section gets its own ID scope
+    // to keep the two apart
+    ImGui::PushID("Environment section");
+    sliderWithBox("Rotation", &settings.environmentRotation, defaults.environmentRotation,
+                  -180.0f, 180.0f, ANGLE_FORMAT, "Turns the sky, fill light and reflections together");
+    sliderWithBox("Intensity", &settings.environmentIntensity, defaults.environmentIntensity,
+                  0.0f, 4.0f, VALUE_FORMAT, "Brightness of the sky, fill light and reflections");
+
+    // The order matches METHOD_SIMPLE and METHOD_PREFILTERED
+    ImGui::Combo("Method", &settings.environmentMethod, "Simple\0Prefiltered\0");
+    ImGui::SetItemTooltip("How the fill light and the reflections are worked out.\n"
+                          "Simple: the blurrier copies of the sky, picked by roughness.\n"
+                          "Prefiltered: maps blurred like a rough surface, made at startup");
+    resetArrow("Method", &settings.environmentMethod, defaults.environmentMethod);
+    ImGui::PopID();
   }
 
   // The lighting can be brighter than the screen can show.
@@ -676,6 +729,8 @@ void buildUi(Settings& settings, Camera& camera, const std::vector<std::string>&
                   blendTip);
     sliderWithBox("Ambient", &settings.weights[3], defaults.weights[3], 0.0f, 1.0f, VALUE_FORMAT,
                   blendTip);
+    sliderWithBox("Reflections", &settings.weights[4], defaults.weights[4], 0.0f, 1.0f, VALUE_FORMAT,
+                  "0 = PBR, 1 = NPR\nNPR has no reflections yet, so toward NPR they fade out");
 
     // Exposure and the tone curve of the Hybrid view, between how PBR and NPR get them
     // When NPR uses tone mapping is ticked, both ends are the same and this slider changes nothing.

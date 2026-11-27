@@ -713,36 +713,155 @@ written here) or moving the shadow into the ramp lookup.
 
 ## Environment lighting (PBR)
 
-**What gets done.** A skybox, and the real physical ambient term: soft light from all around plus
-reflections that blur with roughness.
+**What gets done.** The realistic side is lit by a photo of a whole surrounding scene (an
+environment image). A sky is drawn behind the model, the model gets soft fill light from all
+around, and it reflects the environment, sharp when smooth and blurrier as it gets rougher. We
+use the "split sum" method from Unreal Engine 4 (Karis 2013), combined the way the Khronos glTF
+Sample Renderer does it, so our PBR view can be compared with the Khronos viewer. The simpler
+method this guide first planned stays in as a panel switch (**Method**: Simple / Prefiltered)
+so the two can be shown side by side.
 
-**Files.** `src/texture.cpp` (HDR loading, cubemap), `shaders/skybox.vert`, `shaders/skybox.frag`,
-`shaders/pbr_terms.glsl`, `src/mesh.cpp` (cube), `src/renderer.cpp`.
+Words used below: a **cubemap** is six square pictures on the faces of a cube, read with a
+direction instead of a position. Its **mip levels** are smaller and blurrier copies (each half as
+wide). **Irradiance** is all the light a surface facing one way receives from its half of the
+surroundings, weighted by how steeply it arrives.
+
+**Files.** `src/texture.cpp` (`.hdr` loading, panorama to cubemap), `src/environment.cpp`
+(building the lighting maps and the lookup table at startup), `shaders/environment.glsl` (reading
+the environment with its rotation and intensity), `shaders/sampling.glsl`,
+`shaders/irradiance.frag`, `shaders/prefilter.frag`, `shaders/brdf_lut.frag` (the startup
+passes), `shaders/skybox.vert` and `shaders/skybox.frag` (the sky), `shaders/pbr_terms.glsl`
+(`ambientPhysical`, `reflectionsPhysical`), `src/mesh.cpp` (`createCube`), `src/renderer.cpp`,
+`src/ui.cpp` (the Environment section), `assets/environments/` (five Poly Haven skies).
 
 **How.**
 
-1. Load the `.hdr` panorama: `stbi_loadf(path, &w, &h, &channels, 3)` gives linear floats.
-2. Build the cubemap on the CPU, 256 x 256 per face. For each face pixel compute its direction
-   `d`, then read the panorama at
-   `u = atan(d.z, d.x) / (2 * pi) + 0.5`, `v = acos(d.y) / pi`.
-3. Upload each face i from 0 to 5:
-   `glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB16F, size, size, 0, GL_RGB, GL_FLOAT, data)`,
-   then `glGenerateMipmap(GL_TEXTURE_CUBE_MAP)`, min filter `GL_LINEAR_MIPMAP_LINEAR`, wrap
-   `GL_CLAMP_TO_EDGE`. Once at startup: `glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS)`.
-4. Skybox, drawn after the model:
+1. **Load the image.** `stbi_loadf(path, &w, &h, &channels, 3)` gives linear floats (no gamma).
+   We never flip images on load, so row 0 is the top of the panorama.
+2. **Panorama to cubemap, on the CPU, 512 x 512 per face.** For each face pixel take its
+   direction `d` (the face table in the OpenGL 4.1 specification, section 3.8.10) and read the
+   panorama at `u = atan(d.z, d.x) / (2 * pi) + 0.5`, `v = acos(d.y) / pi`, with bilinear
+   filtering. That `v` is only right because the panorama is not flipped (v = 0 is the top row).
+   Values are capped at 65504, the largest half float (the sun in the sunny sky is 68612).
+3. **Upload.** Each face as `GL_RGBA16F` from `GL_RGB` / `GL_FLOAT` data, then
+   `glGenerateMipmap(GL_TEXTURE_CUBE_MAP)`, min filter `GL_LINEAR_MIPMAP_LINEAR`, wrap
+   `GL_CLAMP_TO_EDGE` on S, T and R. Once at startup: `glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS)`,
+   so the blurry levels do not show the cube edges. Use RGBA16F or RG16F for anything you render
+   into: OpenGL 4.1 does not promise that RGB16F can be a render target.
+4. **Sky, drawn after the model in each strip.**
    - Remove the camera's position from the view matrix: `mat4(mat3(uView))`.
    - `gl_Position = (uProjection * view * vec4(position, 1)).xyww`, which puts it at maximum depth.
    - `glDepthFunc(GL_LEQUAL)` while drawing it, then back to `GL_LESS`.
-   - Fragment: `texture(uEnv, direction).rgb`.
-5. `ambientPhysical`, with `maxMip = log2(size)`:
-   - `diffuseEnv = textureLod(uEnv, N, maxMip - 1).rgb`, a very blurred sample
-   - `specEnv = textureLod(uEnv, R, roughness * maxMip).rgb`
-   - `F = F0 + (max(vec3(1 - roughness), F0) - F0) * (1 - N.V)^5`
-   - `result = (1 - F) * (1 - metallic) * base * diffuseEnv + F * specEnv`
-6. A slider for environment intensity.
+   - Alpha 1, so tone mapping treats the sky like the model (exposure and the curve apply to it).
+   - Background menu: **Sky** (level 0), **Blurred sky** (level 4, 32 pixel faces) or **Plain**
+     (the old gray). Debug views always use Plain so the values they show stay readable.
+5. **Rotation and intensity.** Turning the environment by an angle is the same as turning the
+   lookup direction the other way around the vertical axis. Intensity multiplies every read. The
+   sky, the fill light and the reflections all go through `readEnvironmentMap`, so they always
+   stay lined up and equally bright.
+6. **Maps made at startup, on each environment switch and on `R`** (all in fragment shaders: one
+   full-screen triangle per cube face and mip level, drawn into its own framebuffer).
+   - Irradiance map, 32 x 32 per face: for each direction N, 2048 directions around N picked with
+     the cosine weight (cosine importance sampling), averaged. It stores irradiance / pi, as
+     Khronos does, so `base * irradiance` is the diffuse.
+   - Prefiltered map, 512 x 512 with 6 mip levels (512 down to 16), level k for roughness k / 5:
+     1024 GGX-distributed directions per pixel (Hammersley points), weighted by N.L, assuming
+     the camera looks straight along the normal (N = V = R). Level 0 is a plain copy (a mirror).
+   - Both read a blurrier level of the source for rarely picked directions:
+     `lod = 0.5 * log2(6 * w^2 / (sampleCount * pdf))`, the line the Khronos viewer uses (its
+     version of the Colbert and Krivanek idea, GPU Gems 3 chapter 20). The idea compares the
+     patch a sample stands for, `1 / (sampleCount * pdf)`, with the patch one source pixel covers,
+     `4 * pi / (6 * w^2)`; Khronos leaves out the `4 * pi`, which reads about 1.8 levels blurrier.
+     (GPU Gems itself adds one level on top for the same reason.) Without it the sun turns into
+     bright speckles.
+   - Building both takes about 16 ms here; a switch including loading the file about 100 ms.
+7. **BRDF lookup table, 512 x 512 RG16F, made once.** Across: N.V, up: roughness. Each pixel
+   stores A and B, such that a surface with base reflectance F0 reflects `F0 * A + B` of an even
+   environment. It uses the same height-correlated visibility term as our direct specular.
+8. **Putting it together (Prefiltered).** With `ab = texture(lut, vec2(N.V, roughness)).rg`:
+   - `kS = F0 + (max(1 - roughness, F0) - F0) * (1 - N.V)^5` (Fresnel that knows roughness)
+   - `FssEss = kS * ab.x + ab.y` (light reflected in one bounce)
+   - `Ems = 1 - (ab.x + ab.y)`, `Favg = F0 + (1 - F0) / 21`,
+     `FmsEms = Ems * FssEss * Favg / (1 - Favg * Ems)` (light that bounces more than once
+     between the tiny facets, Fdez-Aguera 2019)
+   - `envF(F0) = FssEss + FmsEms`
+   - **Ambient** = `(1 - envF(0.04)) * (1 - metallic) * base * irradiance(N)`
+   - **Reflections** = `mix(envF(0.04), envF(base), metallic) * prefiltered(R, roughness * 5)`
+9. **Simple method** (the first plan, kept for comparison). Fill light from the 2 x 2 mip level of
+   the environment along N, reflections from level `roughness * (levels - 1)` along R, both with
+   `kS` instead of the lookup table. The plain mip levels are box blurs, so rough metals show the
+   cube faces.
+10. **Terms.** Ambient is the fill light only. Reflections are their own term with their own blend
+    slider; the stylized end has no reflection yet, so sliding toward NPR fades them out. Specular
+    stays the direct highlight only. The direct light's shadow does not dim the environment light,
+    which comes from everywhere. There is a "Reflections only" debug view.
+11. **Occlusion.** A glTF model can carry an occlusion texture (red channel; WaterBottle keeps it
+    in the red channel of its metallic-roughness texture). It says how much of the surroundings a
+    point can see, so creases get less. As glTF asks, Ambient and Reflections are multiplied by
+    `mix(1, ao, occlusionStrength)`; the direct light and the toon side are not. Models without
+    one get the white texture (no change). The "Occlusion" debug view shows the texture value.
+12. **Emissive (glow).** Some glTF surfaces give off light themselves, like a screen or a lamp:
+    emissive factor times the emissive texture (sRGB, so it is read as linear like the base
+    color; black when the model has none). It is added after the blend in all three views, so
+    the glow light itself is the same on every side and slider setting. On screen it then goes
+    through exposure and the tone curve with the rest, so with "NPR uses tone mapping" off the
+    toon side shows it without them, and the Tone mapping slider changes how it looks in the
+    middle. It only brightens its own pixels: a soft halo around it on screen would be bloom, and
+    lighting other surfaces would need indirect lighting (global illumination). On WaterBottle it is the small cyan time and temperature
+    readout on the side. The "Emissive" debug view shows the emissive color. The
+    `KHR_materials_emissive_strength` extension (glow brighter than 1) is not read.
+13. **OpenGL 4.1 limits.** No compute shaders, so the startup passes are fragment shaders. GLSL
+    4.10 has no `textureQueryLevels`, so the program passes the mip count as a uniform.
+    `bitfieldReverse` (for the Hammersley points) is there in 4.10.
 
-**Open point.** Reflections are part of the ambient term here, so the specular slider does not
-affect them. Still to be decided.
+**Checks we ran.** A white sphere in an even white environment, light off, no tone curve, exposure
+1: rough or smooth, metal or not, it reads 1.00 (to within the 0.6 percent steps of an 8-bit
+screen), so no light is lost or made up. Fully rough metal is a smooth blur with Prefiltered and
+shows the cube faces with Simple. The Sphere grid goes steadily from mirror to blur with no
+speckles in the sunny sky.
+
+**Choices and why** (for the slides):
+
+- **Split sum instead of the simple mip trick.** The plain mip levels are box blurs: at high
+  roughness they show the cube faces and blocks, and their blur does not follow the GGX highlight
+  shape. The split sum is what Unreal Engine 4, the Khronos viewer and LearnOpenGL use. The simple
+  one stays as a switch so the difference can be shown.
+- **Irradiance by cosine-weighted samples with the blurrier-source trick** (Khronos) instead of
+  LearnOpenGL's even sweep over the half sphere. LearnOpenGL's sweep takes about 15700 samples
+  per pixel and reads the sharp image, so a small sun can be missed or hit; ours takes 2048 and
+  reads a blur that matches each sample's share.
+- **Irradiance cubemap instead of spherical harmonics** (a handful of numbers describing very soft
+  light). Khronos uses the cubemap too, and it is easier to explain and check.
+- **Sizes.** 512 per face for the sky and the prefiltered map keeps the mirror as sharp as the
+  sky (Khronos uses 256, which would halve it). 6 levels give roughness steps of 0.2 (Khronos: 5
+  levels, steps of 0.25). Irradiance 32 x 32, as LearnOpenGL; it is very smooth anyway.
+- **Sample counts.** 1024 for the prefiltered map and 2048 for irradiance, as Khronos; 1024 for
+  the lookup table (Khronos 512, LearnOpenGL 1024). The two maps build in about 16 ms and the
+  lookup table in about 4 ms, so there was no need to go lower.
+- **Lookup table with the height-correlated visibility term** instead of LearnOpenGL's simpler
+  Schlick-GGX with `k = a^2 / 2`. It matches our direct specular and the Khronos viewer.
+- **Camera along the normal (N = V = R)** when prefiltering, as Karis and Khronos do. The cost: the
+  long stretched reflections you see on wet roads at grazing angles are missing.
+- **Multiple-bounce compensation** (Fdez-Aguera 2019, also in Khronos). Without it rough metals
+  lose the light that bounces between facets and look too dark; with it the white rough metal
+  reads 1.00 in the even white environment.
+- **Occlusion on the environment light only**, as the glTF spec and the Khronos viewer do. The
+  direct light gets its darkening from the shadow map instead; occlusion on it too would darken
+  creases twice.
+- **Diffuse weight with the non-metal Fresnel** `(1 - envF(0.04)) * (1 - metallic)`, the same rule
+  as the direct diffuse (see Cook-Torrance), instead of the mixed F, which would also remove the
+  metal's reflection from the paint.
+- **Reflections on their own slider.** Each piece of light (direct or environment, matte or shiny)
+  gets its own slider, so the Hybrid view can mix, say, a toon highlight with real reflections.
+  With all sliders at PBR the physical result is unchanged.
+- **The sky counts as part of the scene** so exposure and the tone curve change it together with
+  the model, as in a photo.
+- **Rotation starts at 0 degrees.** The Khronos viewer starts at 90, but its code seems to turn
+  the other way from ours, so the match may be 270 instead. The Reference check settles it.
+- **Blurred sky level 4** (32 pixel faces): picked by eye, soft enough that the model stands out.
+- **Five Poly Haven skies** (CC0, 2k `.hdr`, 4.6 to 6.7 MB each): partly cloudy with sun, overcast,
+  a small studio, a photo studio room and a sunset. The Khronos sample environments state no
+  license, so we could not use those.
 
 ---
 
@@ -757,7 +876,7 @@ every debug view working.
 
 1. NPR: `ambientStylized = uAmbientColor * s.baseColor`, with a color picker
    (`ImGui::ColorEdit3`).
-2. Both: presets are a small array of `{ name, four weights }`. `ImGui::Button(name)` copies the
+2. Both: presets are a small array of `{ name, five weights }`. `ImGui::Button(name)` copies the
    weights into `Settings`.
 3. Both: labels with
    `ImGui::GetForegroundDrawList()->AddText(position, color, "PBR")`, one per strip.
@@ -788,9 +907,12 @@ fresh clone without touching code.
 ## Sources
 
 - LearnOpenGL, the PBR chapters (theory, lighting, IBL) and the shadow mapping chapter, for the
-  Cook-Torrance, shadow map and cubemap formulas.
-- Brian Karis, "Real Shading in Unreal Engine 4" (2013), for `a = roughness^2` and as background
-  for the `k` remap in LearnOpenGL's geometry term (we use Heitz's visibility term instead).
+  Cook-Torrance, shadow map and cubemap formulas. The two IBL chapters (Diffuse irradiance,
+  Specular IBL) were the starting point for environment lighting and the comparison in its
+  "Choices and why".
+- Brian Karis, "Real Shading in Unreal Engine 4" (2013), for `a = roughness^2`, as background
+  for the `k` remap in LearnOpenGL's geometry term (we use Heitz's visibility term instead), and
+  for the split sum of environment lighting (prefiltered map plus lookup table, N = V = R).
 - The glTF 2.0 specification, for the material layout and accessor structure, and its Appendix B
   for the Cook-Torrance formulas.
 - Walter, Marschner, Li and Torrance, "Microfacet Models for Refraction through Rough Surfaces"
@@ -800,7 +922,13 @@ fresh clone without touching code.
 - Eric Heitz, "Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs" (2014), for
   the height-correlated visibility term.
 - Khronos glTF Sample Renderer (the code behind the glTF Sample Viewer), `brdf.glsl` and
-  `pbr.frag`, for how the visibility term and the diffuse weight are put together.
+  `pbr.frag`, for how the visibility term and the diffuse weight are put together, and `ibl.glsl`
+  and `ibl_filtering.frag` for the environment maps and how they are combined.
+- Mark Colbert and Jaroslav Krivanek, "GPU-Based Importance Sampling" (GPU Gems 3, chapter 20,
+  2007), for reading a blurrier source level for rarely picked samples.
+- Carmelo J. Fdez-Aguera, "A Multiple-Scattering Microfacet Model for Real-Time Image-based
+  Lighting" (Journal of Computer Graphics Techniques, 2019), for the multiple-bounce compensation.
+- Poly Haven (polyhaven.com), for the five environment images (CC0; see `assets/CREDITS.md`).
 - Lake, Marshall, Harris and Blackstein, "Stylized Rendering Techniques for Scalable Real-Time 3D
   Animation" (NPAR 2000), for the ramp lookup of the toon diffuse.
 - Mitchell, McTaggart and Green, "Shading in Valve's Source Engine" (SIGGRAPH 2006 course), for

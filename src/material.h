@@ -19,8 +19,9 @@ struct MaterialTexture {
 };
 
 // Everything one material of a model file says about its surface
-// These are the glTF material inputs. For now the renderer uses the base color and the
-// metallic and roughness values; the others are loaded so they are ready for later.
+// These are the glTF material inputs. For now the renderer uses the base color, metallic,
+// roughness, occlusion and emissive; the normal map and the alpha and double-sided settings are
+// loaded so they are ready for later.
 // Each texture is multiplied by its factor in the shader.
 struct Material {
   // Base color and its texture (RGBA)

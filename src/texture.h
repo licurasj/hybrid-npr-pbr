@@ -43,3 +43,35 @@ GLuint createTexture(const unsigned char* pixels, int width, int height, const T
 // Make a 1 x 1 white texture, used when a material has no texture of some kind
 // so the shader can always read a texture and multiply it by the factor.
 GLuint createWhiteTexture();
+
+
+// Environment images
+
+// Width and height of each cube face made from an environment image, in pixels
+// A 2048 x 1024 panorama has about as many pixels around its middle as four faces of 512.
+const int ENVIRONMENT_FACE_SIZE = 512;
+
+// A cubemap made from an environment image, and how many mip levels it has
+// GLSL 4.10 has no function that asks a texture for its number of levels,
+// so the program keeps the count and passes it to the shaders.
+// The irradiance and prefiltered maps are made from the cubemap at startup, see environment.h.
+// They stay 0 until then.
+struct EnvironmentMap {
+  GLuint cubemap = 0;
+  int mipCount = 0;
+  GLuint irradiance = 0;       // fill light for each normal direction
+  GLuint prefiltered = 0;      // reflections, one mip level per roughness step
+  int prefilteredMipCount = 0;
+};
+
+// Load a .hdr panorama (an equirectangular image: 360 degrees across, 180 degrees down)
+// and turn it into a cubemap with faceSize x faceSize pixels per face and a full mip chain.
+// The values stay linear floats, stored as 16-bit floats.
+// Returns a map with cubemap 0 if the file could not be read, after printing why.
+EnvironmentMap loadEnvironmentMap(const std::string& path, int faceSize);
+
+// Make a 1 x 1 cubemap of one linear color, used when no environment image can be read
+EnvironmentMap createPlainEnvironmentMap(float value);
+
+// Free the cubemap and the maps made from it
+void deleteEnvironmentMap(EnvironmentMap& map);

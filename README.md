@@ -3,7 +3,7 @@
 A real-time 3D viewer with one shader that mixes physically based rendering (PBR) and
 non-photorealistic rendering (NPR, also called stylized or toon shading) inside a single material.
 
-Each lighting term (diffuse, specular, shadow, ambient) can be fully physical, fully stylized, or a
+Each lighting term (diffuse, specular, shadow, ambient, reflections) can be fully physical, fully stylized, or a
 weighted blend of the two, set with sliders while the program runs. The viewer shows the pure PBR,
 pure NPR and hybrid versions of the same model side by side under a light you can move.
 
@@ -12,14 +12,17 @@ Final project for CSCI 420 Computer Graphics at the University of Southern Calif
 > **Status: early development.** The window, the control panel, an orbit camera and a test sphere
 > work. The sphere already uses the hybrid shader with its blend sliders and is shown as
 > PBR, Hybrid and NPR side by side. The PBR side has its real Cook-Torrance shading and the NPR
-> side its ramp diffuse and toon highlight, while the ambient light is still a simple placeholder.
+> side its ramp diffuse and toon highlight. The PBR side is also lit by an environment image (a sky
+> behind the model, soft fill light and reflections), while the NPR ambient is still a placeholder.
 > The build steps have been checked on Windows; macOS and Linux are not tested yet.
 
 ## What it does
 
 - **Physical side.** Cook-Torrance microfacet BRDF (GGX distribution, Smith geometry term, Schlick
   Fresnel) with Lambert diffuse, driven by base color, metallic and roughness textures. HDR
-  rendering with tone mapping. Environment reflections that blur as roughness increases.
+  rendering with tone mapping. Image-based lighting from an environment image: fill light and
+  reflections that blur as roughness increases (the split-sum method), with the sky drawn behind
+  the model.
 - **Stylized side.** Ramp (toon) diffuse that looks up a 1D color ramp, and a hard-edged highlight
   whose size still follows roughness.
 - **Shadows.** One shadow-mapped directional light. On the stylized side the shadow goes into the
@@ -106,14 +109,15 @@ with OpenGL 4.1" means the driver does not offer OpenGL 4.1; updating it usually
 | Left mouse drag | Orbit the camera around the model |
 | Mouse wheel | Zoom |
 | Right mouse drag | Move the light direction |
-| `R` | Reload shaders from disk |
+| `R` | Reload shaders from disk (the environment lighting maps are rebuilt with them) |
 | `Esc` | Quit |
 
 The control panel on the right shows the frame rate and OpenGL version, a Reset camera button,
-the light direction, intensity and ambient color, exposure and the tone curve with two
+the light direction, intensity and ambient color, the environment (see Environment lighting
+below), exposure and the tone curve with two
 ticks (see Tone mapping below), the base color, metallic and roughness, the NPR shading settings
 (see below), and the blend
-sliders (Shadow, Diffuse, Specular, Ambient, Tone mapping). A blend slider at 0 uses
+sliders (Shadow, Diffuse, Specular, Ambient, Reflections, Tone mapping). A blend slider at 0 uses
 the physical version of that term and at 1 the stylized version; values in between mix the two. The
 small PBR and NPR labels above the sliders mark these two ends, and hovering a slider says the same.
 Each slider has a small number box next to it where you can type a value and press Enter.
@@ -122,9 +126,11 @@ puts the default back, and so does double-clicking a slider bar. While anything 
 changed, an arrow at the right end of its header resets that whole section, and a Reset all
 button next to the frame rate puts every setting and the camera back. "Changed" means changed in
 the digits the panel shows, and the color boxes always show red, green and blue from 0 to 255.
-The fifth blend slider, Tone mapping, works the same way for the screen step described below.
+The last blend slider, Tone mapping, works the same way for the screen step described below.
 The PBR diffuse and specular are real Cook-Torrance shading, and the NPR diffuse and specular are
-the ramp shading and toon highlight described below. Both ambient terms are still placeholders.
+the ramp shading and toon highlight described below. The PBR ambient and reflections come from
+the environment; the NPR ambient is still a placeholder and the NPR side has no reflections yet,
+so moving the Reflections slider toward NPR fades them out.
 The Shadow slider has no visible effect yet, because there are no
 shadows until the shadow map is added.
 The window opens maximized.
@@ -182,17 +188,22 @@ dragging the mouse anywhere left of the panel turns all of them together. Narrow
 field of view from top to bottom, so the model still fits across each one.
 
 The Debug view menu under it shows one value on its own in every view: Default is the normal
-picture, then base color, metallic, roughness, the surface normal (as a color, x red, y green, z
-blue), shadow visibility (white everywhere until shadows are added), and the diffuse, specular or
-ambient term alone. Both sides use metallic and roughness: the NPR side only for its highlight.
+picture, then base color, emissive (the glow some models have, such as the small readout on the
+side of WaterBottle; black for most), metallic, roughness, the surface normal (as a color, x red, y green, z
+blue), the occlusion texture (how much of the surroundings each point sees, white where the
+model has none), shadow visibility (white everywhere until shadows are added), and the diffuse, specular,
+ambient or reflections term alone. Specular is the highlight from the light, Ambient the fill light
+from the environment and Reflections the environment seen in the surface. Debug views use the plain
+background. Both sides use metallic and roughness: the NPR side only for its highlight.
 
 Each view also shows a faint grid on the floor under the model, with the X axis line in red and
 the Z axis line in blue, and a small set of axes in its bottom left corner: X red, Y green, Z blue.
 The corner axes turn with the camera, so they show which way you are looking. The Show grid and
 Show axes checkboxes under the Debug view menu turn them on and off.
 
-The shader is split into four files in `shaders/`: `common.glsl` (shared values), `pbr_terms.glsl`
-(physical side), `npr_terms.glsl` (stylized side) and `hybrid_main.glsl` (mixes the two). The
+The shader is split into five files in `shaders/`: `common.glsl` (shared values),
+`environment.glsl` (reading the environment), `pbr_terms.glsl` (physical side), `npr_terms.glsl`
+(stylized side) and `hybrid_main.glsl` (mixes the two). The
 program joins them in that order. If a file has an error, `R` keeps the old picture and the console
 shows the file name and line.
 
@@ -205,7 +216,7 @@ The lighting can get brighter than a screen can show, so the picture goes throug
 before it reaches the window. The Tone mapping section of the panel has the Exposure slider (it
 scales the brightness, 1 leaves it as it is) and the Tone curve menu: Off just cuts everything
 above 1 off, while Reinhard and ACES fit (a film-like curve) squeeze bright values back into range.
-The background, the grid and the axes skip exposure and the curve, so they look the same whatever
+The sky gets them like the model does. The plain background, the grid and the axes skip exposure and the curve, so they look the same whatever
 you pick here. The base color and ambient color you pick in the panel are read as normal screen
 colors, the same way color textures are, and turned into light values before the shading.
 
@@ -217,11 +228,33 @@ is shown at 1. It only changes how the Hybrid view is shown, not its shading. Wh
 on, both ends are the same, so that slider changes nothing.
 
 The Tone mapping on debug view tick decides whether a debug view gets this step too. It
-sets itself each time you pick a debug view: off for base color, metallic, roughness, normal and
-shadow, on for the diffuse, specular and ambient terms (which are light and can go above 1). You
+sets itself each time you pick a debug view: off for base color, emissive, metallic, roughness,
+normal, occlusion and shadow, on for the diffuse, specular, ambient and reflections terms (which are light and can go
+above 1). You
 can change it afterwards. Metallic, roughness, normal and shadow are numbers rather than colors, so
 they are always shown as stored, without the sRGB step. The Default view always
 gets the full step, so the tick is grayed out there.
+
+### Environment lighting
+
+The PBR side is lit by a photo of a whole surrounding scene (an `.hdr` environment image from
+`assets/environments/`). The Environment section of the panel has:
+
+- **Environment**: Partly cloudy (with sun), Overcast, Small studio, Photo studio and Sunset. The
+  lighting is rebuilt when you switch, which takes about a tenth of a second.
+- **Background**: Sky, Blurred sky (softer, so the model stands out) or Plain (the gray from
+  before). The model is lit by the environment in every case.
+- **Rotation**: turns the environment around the vertical axis. The Khronos glTF Sample Viewer
+  starts at 90 degrees, but it may count the angle the other way round, so to compare with it
+  try 90 here, and 270 if the sun ends up on the other side.
+- **Intensity**: brightness of the whole environment (sky, fill light and reflections).
+- **Method**: Prefiltered is the accurate one (light maps made from the image when it loads).
+  Simple uses plain blurred copies of the image; it is there for comparison and shows blocky cube
+  faces on rough metals.
+
+The environment light is not darkened by the shadow of the direct light, because it comes from
+everywhere. A model with a glTF occlusion texture (such as WaterBottle) gets less of it in
+its creases, as glTF intends; the direct light ignores that texture.
 
 ## Documentation
 

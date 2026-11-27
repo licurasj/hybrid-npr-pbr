@@ -27,7 +27,7 @@ uniform int uToneCurve;
 uniform float uToneAmount;
 
 // 1 turns scene pixels from linear to sRGB, 0 shows the values as they are stored,
-// which the data debug views (metallic, roughness, normal, shadow) need
+// which the data debug views (metallic, roughness, normal, occlusion, shadow) need
 uniform int uSceneToSrgb;
 
 

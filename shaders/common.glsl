@@ -14,6 +14,7 @@ struct Surface {
   vec3 baseColor;   // linear
   float metallic;   // 0 non-metal, 1 metal
   float roughness;  // 0 mirror, 1 fully rough
+  float occlusion;  // 1 open, toward 0 in creases the environment light reaches less
 };
 
 // What every term function knows about the light
@@ -40,6 +41,19 @@ uniform vec3 uBaseColor;
 uniform float uMetallic;
 uniform float uRoughness;
 
+// Ambient occlusion, red channel of its texture as in glTF (some models keep it in the red channel
+// of the metallic-roughness texture, which is then bound here too)
+// Strength 0 turns it off, 1 uses it fully.
+uniform sampler2D uOcclusionTexture;          // texture unit 9
+uniform int uOcclusionUVSet;
+uniform float uOcclusionStrength;
+
+// Light the surface gives off by itself, color times the texture (sRGB, so it is read as linear)
+// A material without emission has the factor 0, so it adds nothing.
+uniform sampler2D uEmissiveTexture;           // texture unit 10
+uniform int uEmissiveUVSet;
+uniform vec3 uEmissiveFactor;
+
 // Which value to show on its own, 0 is the normal lit picture
 uniform int uDebugView;
 
@@ -48,6 +62,7 @@ uniform float uWeightShadow;
 uniform float uWeightDiffuse;
 uniform float uWeightSpecular;
 uniform float uWeightAmbient;
+uniform float uWeightReflections;
 
 
 // Half vector, the direction halfway between the light and the camera

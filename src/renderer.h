@@ -6,6 +6,7 @@
 #include "mesh.h"
 #include "model.h"
 #include "settings.h"
+#include "texture.h"
 
 // Length of the axis lines in the corner indicator
 // The indicator square goes from minus 1 to 1, and the letters sit a little past the line tips.
@@ -24,8 +25,12 @@ glm::mat4 fitModelMatrix(const Model& model);
 // and every strip uses the same camera and light.
 // Every mesh and material pair of the model is drawn in every strip.
 // rampTexture is the ramp image the stylized diffuse reads.
+// environment is the environment image the physical side is lit by, with the maps made from it,
+// and brdfLookupTable the table the prefiltered method reads. The sky program draws it
+// behind the model on the cube mesh, unless the background is plain or a debug view is shown.
 // The line program draws the floor grid and the axis indicator in every strip.
-void drawScene(GLuint program, GLuint lineProgram, const Model& model, GLuint rampTexture,
+void drawScene(GLuint program, GLuint skyProgram, GLuint lineProgram, const Model& model,
+               GLuint rampTexture, const EnvironmentMap& environment, GLuint brdfLookupTable, const Mesh& cube,
                const LineMesh& grid, const LineMesh& axes, const Camera& camera,
                const Settings& settings, int sceneWidth, int sceneHeight);
 

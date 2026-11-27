@@ -89,6 +89,7 @@ target_include_directories(glad PUBLIC third_party/glad/include)
 add_executable(viewer
   src/camera.cpp
   src/color.cpp
+  src/environment.cpp
   src/framebuffer.cpp
   src/main.cpp
   src/mesh.cpp

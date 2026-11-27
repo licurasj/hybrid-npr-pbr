@@ -45,3 +45,6 @@ imgui.ini
 *.local.toml
 .env
 .env.*
+
+# Models we may only use locally (their license does not allow sharing them here)
+/assets/models/DamagedHelmet.glb

@@ -96,6 +96,32 @@ Mesh createMesh(const std::vector<float>& vertices, const std::vector<unsigned i
 }
 
 
+// Make a cube from -1 to 1 on every axis
+// The sky is seen from inside, so the corners could be listed either way round,
+// face culling is not turned on.
+Mesh createCube() {
+  std::vector<float> vertices;
+  for (int i = 0; i < 8; i++) {
+    // Corner i has x, y and z at -1 or 1 from the three lowest bits of i
+    float corner[3] = { (i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f };
+    for (int k = 0; k < FLOATS_PER_VERTEX; k++) {
+      vertices.push_back(k < 3 ? corner[k] : 0.0f);
+    }
+  }
+
+  // Two triangles for each side, by corner number
+  std::vector<unsigned int> indices = {
+    0, 2, 4, 2, 6, 4,  // x = -1
+    1, 5, 3, 3, 5, 7,  // x = 1
+    0, 4, 1, 1, 4, 5,  // y = -1
+    2, 3, 6, 3, 7, 6,  // y = 1
+    0, 1, 2, 1, 3, 2,  // z = -1
+    4, 6, 5, 5, 6, 7,  // z = 1
+  };
+  return createMesh(vertices, indices);
+}
+
+
 // Draw the mesh with the shader program that is in use
 void drawMesh(const Mesh& mesh) {
   glBindVertexArray(mesh.vao);

@@ -29,6 +29,10 @@ Mesh createMesh(const std::vector<float>& vertices, const std::vector<unsigned i
 // Without a center and radius it is the unit sphere around the origin.
 Mesh createSphere(int stacks, int slices, glm::vec3 center = glm::vec3(0.0f), float radius = 1.0f);
 
+// Make a cube from -1 to 1 on every axis, used to draw the sky around the scene
+// Only the positions are used, the other vertex values are 0.
+Mesh createCube();
+
 // Draw the mesh with the shader program that is in use
 void drawMesh(const Mesh& mesh);
 

@@ -103,3 +103,8 @@ vec3 specularStylized(Surface s, Light l, float shadow) {
 vec3 ambientStylized(Surface s) {
   return uAmbientColor * s.baseColor;
 }
+
+// No stylized reflections yet, so moving the Reflections slider toward NPR fades them out
+vec3 reflectionsStylized(Surface s) {
+  return vec3(0.0);
+}

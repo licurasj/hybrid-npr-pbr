@@ -13,6 +13,7 @@
 
 #include "camera.h"
 #include "color.h"
+#include "environment.h"
 #include "framebuffer.h"
 #include "mesh.h"
 #include "model.h"
@@ -41,11 +42,26 @@ std::string shaderFolder = SHADER_DIR;
 std::string assetFolder = ASSET_DIR;
 
 // The fragment shader is joined from these files in this order
-std::vector<std::string> fragmentFiles = { "common.glsl", "pbr_terms.glsl", "npr_terms.glsl", "hybrid_main.glsl" };
+std::vector<std::string> fragmentFiles = { "common.glsl", "environment.glsl", "pbr_terms.glsl", "npr_terms.glsl",
+                                           "hybrid_main.glsl" };
+
+// The sky's fragment shader is joined the same way, so it reads the environment like the model does
+std::vector<std::string> skyFragmentFiles = { "environment.glsl", "skybox.frag" };
 
 // Ramp images in assets/ramps, in the same order as the ramp menu in the panel
 const int RAMP_COUNT = 2;
 const char* RAMP_FILES[RAMP_COUNT] = { "two-band.png", "three-band.png" };
+
+// Environment images in assets/environments, in the same order as the environment menu in the panel
+// All five are from Poly Haven, see assets/CREDITS.md.
+const int ENVIRONMENT_COUNT = 5;
+const char* ENVIRONMENT_FILES[ENVIRONMENT_COUNT] = {
+  "kloofendal_48d_partly_cloudy_puresky_2k.hdr",
+  "overcast_soil_puresky_2k.hdr",
+  "studio_small_03_2k.hdr",
+  "brown_photostudio_02_2k.hdr",
+  "belfast_sunset_puresky_2k.hdr",
+};
 
 
 // Function declarations
@@ -58,11 +74,14 @@ void scrollCallback(GLFWwindow* window, double xOffset, double yOffset);
 
 // Shaders
 // Build the shader programs again and keep the old one of each that fails
-void reloadShaders(GLuint& program, GLuint& lineProgram, GLuint& toneMapProgram);
+void reloadShaders(GLuint& program, GLuint& skyProgram, GLuint& lineProgram, GLuint& toneMapProgram,
+                   EnvironmentMap& environment, GLuint& brdfLookupTable, GLuint emptyVertexArray);
 
 // Textures
 // Load a ramp image of the stylized diffuse, or a white one if the file cannot be read
 GLuint loadRampTexture(const std::string& path);
+// Load an environment image, or a plain gray environment if the file cannot be read
+EnvironmentMap loadEnvironment(const std::string& path);
 
 // Models
 // The sphere as a model with one part, drawn with white textures and the panel's material
@@ -131,8 +150,11 @@ void scrollCallback(GLFWwindow* window, double xOffset, double yOffset) {
 
 // Build the shaders again from the files
 // If the new version has an error, the old program stays in use.
-// The sphere shader, the line shader and the tone mapping shader are checked one by one.
-void reloadShaders(GLuint& program, GLuint& lineProgram, GLuint& toneMapProgram) {
+// The sphere shader, the sky shader, the line shader and the tone mapping shader are checked one by one.
+// The environment lighting maps and the lookup table are drawn by shaders too, so they are built
+// again from the new files; if one of those shaders has an error, the old maps stay.
+void reloadShaders(GLuint& program, GLuint& skyProgram, GLuint& lineProgram, GLuint& toneMapProgram,
+                   EnvironmentMap& environment, GLuint& brdfLookupTable, GLuint emptyVertexArray) {
   GLuint newProgram = loadShaderProgram(shaderFolder, "mesh.vert", fragmentFiles);
   if (newProgram == 0) {
     std::printf("Keeping the old shaders\n");
@@ -140,6 +162,15 @@ void reloadShaders(GLuint& program, GLuint& lineProgram, GLuint& toneMapProgram)
     glDeleteProgram(program);
     program = newProgram;
     std::printf("Shaders reloaded\n");
+  }
+
+  GLuint newSkyProgram = loadShaderProgram(shaderFolder, "skybox.vert", skyFragmentFiles);
+  if (newSkyProgram == 0) {
+    std::printf("Keeping the old sky shaders\n");
+  } else {
+    glDeleteProgram(skyProgram);
+    skyProgram = newSkyProgram;
+    std::printf("Sky shaders reloaded\n");
   }
 
   GLuint newLineProgram = loadShaderPair(shaderFolder, "line.vert", "line.frag");
@@ -158,6 +189,19 @@ void reloadShaders(GLuint& program, GLuint& lineProgram, GLuint& toneMapProgram)
     glDeleteProgram(toneMapProgram);
     toneMapProgram = newToneMapProgram;
     std::printf("Tone mapping shaders reloaded\n");
+  }
+
+  // The maps need an environment image to start from, which the first frame loads
+  if (environment.cubemap != 0) {
+    buildEnvironmentLighting(environment, shaderFolder, emptyVertexArray);
+  }
+
+  GLuint newLookupTable = createBrdfLookupTable(shaderFolder, emptyVertexArray);
+  if (newLookupTable == 0) {
+    std::printf("Keeping the old BRDF lookup table\n");
+  } else {
+    glDeleteTextures(1, &brdfLookupTable);
+    brdfLookupTable = newLookupTable;
   }
 }
 
@@ -184,6 +228,18 @@ GLuint loadRampTexture(const std::string& path) {
     texture = createWhiteTexture();
   }
   return texture;
+}
+
+
+// Load an environment image as a cubemap
+// A missing or broken file leaves a plain gray environment, so the model is still lit a little.
+EnvironmentMap loadEnvironment(const std::string& path) {
+  EnvironmentMap environment = loadEnvironmentMap(path, ENVIRONMENT_FACE_SIZE);
+  if (environment.cubemap == 0) {
+    std::printf("The environment is plain gray instead\n");
+    environment = createPlainEnvironmentMap(0.2f);
+  }
+  return environment;
 }
 
 
@@ -343,7 +399,8 @@ int main(int argc, char** argv) {
   GLuint program = loadShaderProgram(shaderFolder, "mesh.vert", fragmentFiles);
   GLuint lineProgram = loadShaderPair(shaderFolder, "line.vert", "line.frag");
   GLuint toneMapProgram = loadShaderPair(shaderFolder, "fullscreen.vert", "tonemap.frag");
-  if (program == 0 || lineProgram == 0 || toneMapProgram == 0) {
+  GLuint skyProgram = loadShaderProgram(shaderFolder, "skybox.vert", skyFragmentFiles);
+  if (program == 0 || lineProgram == 0 || toneMapProgram == 0 || skyProgram == 0) {
     std::printf("Could not load the shaders, stopping\n");
     shutdownUi();
     glfwTerminate();
@@ -389,6 +446,14 @@ int main(int argc, char** argv) {
   // Why the last model did not load, shown in the panel
   std::string modelMessage;
 
+  // The environment picked in the panel, loaded in the frame loop like the model
+  // shownEnvironment starts at -1, which is no menu entry, so the first frame loads one.
+  EnvironmentMap environment;
+  int shownEnvironment = -1;
+
+  // The cube the sky is drawn on
+  Mesh skyCube = createCube();
+
   // A 20 by 20 floor grid, which every model rests on
   LineMesh grid = createGrid(20, FLOOR_HEIGHT);
 
@@ -411,6 +476,9 @@ int main(int argc, char** argv) {
   GLuint emptyVertexArray;
   glGenVertexArrays(1, &emptyVertexArray);
 
+  // The lookup table of the prefiltered method is the same for every environment
+  GLuint brdfLookupTable = createBrdfLookupTable(shaderFolder, emptyVertexArray);
+
   // Neutral dark gray background, a little darker than the panel
   // It is picked by eye, so it is turned into a linear value like the other colors.
   // Alpha 0 marks it as not part of the scene, so the last pass gives it only the sRGB step.
@@ -418,6 +486,10 @@ int main(int argc, char** argv) {
 
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_MULTISAMPLE);
+
+  // Blend across the edges of cube faces when a cubemap is read
+  // Without it each face is filtered on its own, and the blurry mip levels show the face edges as seams.
+  glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
@@ -446,7 +518,8 @@ int main(int argc, char** argv) {
     // R reloads the shaders once per key press, not every frame it is held
     bool reloadKeyDown = !typing && glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS;
     if (reloadKeyDown && !reloadKeyWasDown) {
-      reloadShaders(program, lineProgram, toneMapProgram);
+      reloadShaders(program, skyProgram, lineProgram, toneMapProgram, environment, brdfLookupTable,
+                    emptyVertexArray);
     }
     reloadKeyWasDown = reloadKeyDown;
 
@@ -471,6 +544,14 @@ int main(int argc, char** argv) {
           modelMessage = "";
         }
       }
+    }
+
+    // Build the cubemap of the environment picked in the menu
+    if (settings.environmentChoice != shownEnvironment) {
+      deleteEnvironmentMap(environment);
+      environment = loadEnvironment(assetFolder + "environments/" + ENVIRONMENT_FILES[settings.environmentChoice]);
+      shownEnvironment = settings.environmentChoice;
+      buildEnvironmentLighting(environment, shaderFolder, emptyVertexArray);
     }
 
     // The sphere takes its material from the panel
@@ -519,8 +600,8 @@ int main(int argc, char** argv) {
     } else if (shownChoice == MODEL_SPHERE_GRID) {
       shownModel = &sphereGrid;
     }
-    drawScene(program, lineProgram, *shownModel, rampTextures[settings.rampChoice], grid, axes, camera,
-              settings, sceneWidth, height);
+    drawScene(program, skyProgram, lineProgram, *shownModel, rampTextures[settings.rampChoice], environment,
+              brdfLookupTable, skyCube, grid, axes, camera, settings, sceneWidth, height);
 
     // Draw the HDR picture onto the window with the tone mapping pass
     // It treats each sample on its own and averages them there.
@@ -541,6 +622,9 @@ int main(int argc, char** argv) {
   deleteModel(sphereGrid);
   deleteModel(fileModel);
   glDeleteTextures(RAMP_COUNT, rampTextures);
+  deleteEnvironmentMap(environment);
+  glDeleteTextures(1, &brdfLookupTable);
+  deleteMesh(skyCube);
   deleteLines(grid);
   deleteLines(axes);
   deleteHdrTarget(hdrTarget);
@@ -548,6 +632,7 @@ int main(int argc, char** argv) {
   glDeleteProgram(program);
   glDeleteProgram(lineProgram);
   glDeleteProgram(toneMapProgram);
+  glDeleteProgram(skyProgram);
 
   shutdownUi();
   glfwTerminate();

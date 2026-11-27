@@ -47,7 +47,7 @@ Finished and take your name off again.
 | Cook-Torrance | | Finished |
 | Shadow map | | Not started |
 | Shadow in the ramp | | Not started |
-| Environment lighting | | Not started |
+| Environment lighting | | Finished |
 | Hybrid polish | | Not started |
 | Reference check | | Not started |
 | Demo and report material | | Not started |
@@ -67,7 +67,7 @@ Finished and take your name off again.
 | Shadow map | The model casts a soft shadow on itself and on the ground | Both | 5 | Phong sphere | Nov 29 |
 | Shadow in the ramp | On the toon side, shadows fall into the same color bands as the shading | NPR | 7 | Ramp shading, Shadow map | Nov 30 |
 | Environment lighting | A sky behind the model. Metals reflect it, blurrier as they get rougher | PBR | 9 | HDR and color, Cook-Torrance | Dec 1 |
-| Hybrid polish | Toon ambient light, preset buttons for nice mixes, labels on the three views | NPR, then Both | 7 | Ramp shading, Cook-Torrance | Dec 1 |
+| Hybrid polish | Toon ambient light (a switch: flat color, from the sky, or from the sky in the ramp bands), preset buttons for nice mixes, labels on the three views | NPR, then Both | 7 | Ramp shading, Cook-Torrance | Dec 1 |
 | Reference check | Screenshots comparing our PBR view with a reference viewer | PBR | 4 | Cook-Torrance, Environment lighting | Dec 2 |
 | Demo and report material | Final screenshots, finished README, a practiced 10 minute demo | Both | 8 | everything | Dec 2 |
 
@@ -148,8 +148,8 @@ Quick things to look for. They're there to catch mistakes early, not to be ticke
 - **Reference check.** We load the same sample models in our viewer and in the
   [Khronos glTF Sample Viewer](https://github.khronos.org/glTF-Sample-Viewer-Release/). The
   material debug views should match exactly. The lit picture will be close but not identical,
-  mostly in reflections on rough surfaces, because we use a simpler method. We write down where it
-  differs and why.
+  for example because our environment maps use other sizes and sample counts. We write down where
+  it differs and why.
 - **Demo and report material.** One of us runs the demo from a fresh copy without touching code.
 
 ## If we run short on time
@@ -175,6 +175,7 @@ the test materials and come back to it later.
 | Outline | A dark outline around the model in the toon and hybrid views | 4 | Ramp shading |
 | Cloth sheen | A soft bright edge on cloth at grazing angles | 4 | Cook-Torrance |
 | Stretched highlight | For brushed metal or satin | 5 | Cook-Torrance, Normal mapping |
-| Accurate reflections | Rough reflections that match the reference viewer | 8 | Environment lighting |
-| Blend per material | Each material of a model (cloth, skin, hair) gets its own four blend sliders, saved in presets, e.g. PBR cloth with NPR skin and hair | 3 | glTF loading, Hybrid polish |
+| Toon reflections | Metals on the toon side reflect the sky cut into a few hard color steps, with an Off / On switch | 2 | Environment lighting |
+| ~~Accurate reflections~~ | Already covered: Environment lighting ended up using the accurate method, so there's nothing left to do here | - | - |
+| Blend per material | Each material of a model (cloth, skin, hair) gets its own blend sliders, saved in presets, e.g. PBR cloth with NPR skin and hair | 3 | glTF loading, Hybrid polish |
 | Per-region mask | A painted mask texture fine-tunes the blend inside a material, e.g. a soft fade from skin to sleeve. Works on top of the per-material blend | 6 | Blend per material |

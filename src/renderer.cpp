@@ -42,6 +42,31 @@ static int countViews(const int* views) {
 }
 
 
+// Environment uniforms, used by both the hybrid program and the sky program
+// The cubemap itself is bound to texture unit 4 by drawScene.
+static void setEnvironmentUniforms(GLuint program, const EnvironmentMap& environment,
+                                   const Settings& settings) {
+  setUniform(program, "uEnvironment", 4);
+  setUniform(program, "uEnvironmentMipCount", environment.mipCount);
+  setUniform(program, "uEnvironmentRotation", glm::radians(settings.environmentRotation));
+  setUniform(program, "uEnvironmentIntensity", settings.environmentIntensity);
+}
+
+
+// Uniforms of the prefiltered method, only the hybrid program has them
+// When a map is missing because its shader did not load, the simple method is used instead.
+static void setMethodUniforms(GLuint program, const EnvironmentMap& environment, GLuint brdfLookupTable,
+                              const Settings& settings) {
+  setUniform(program, "uIrradianceMap", 6);
+  setUniform(program, "uPrefilteredMap", 7);
+  setUniform(program, "uBrdfLookupTable", 8);
+  setUniform(program, "uPrefilteredMipCount", environment.prefilteredMipCount);
+  bool mapsReady = environment.irradiance != 0 && environment.prefiltered != 0 && brdfLookupTable != 0;
+  int method = mapsReady ? settings.environmentMethod : METHOD_SIMPLE;
+  setUniform(program, "uEnvironmentMethod", method);
+}
+
+
 // Uniforms that are the same in every strip
 static void setSharedUniforms(GLuint program, const Model& model, const Camera& camera,
                               const Settings& settings) {
@@ -63,6 +88,8 @@ static void setSharedUniforms(GLuint program, const Model& model, const Camera& 
   setUniform(program, "uBaseColorTexture", 0);
   setUniform(program, "uMetallicRoughnessTexture", 1);
   setUniform(program, "uRampTexture", 5);
+  setUniform(program, "uOcclusionTexture", 9);
+  setUniform(program, "uEmissiveTexture", 10);
 
   // Every strip shows the same debug view
   setUniform(program, "uDebugView", settings.debugView);
@@ -100,15 +127,23 @@ static void drawModel(GLuint program, const Model& model) {
     setUniform(program, "uBaseColor", glm::vec3(material.baseColorFactor));
     setUniform(program, "uMetallic", material.metallicFactor);
     setUniform(program, "uRoughness", material.roughnessFactor);
+    setUniform(program, "uOcclusionStrength", material.occlusionStrength);
+    setUniform(program, "uEmissiveFactor", material.emissiveFactor);
 
     // Each texture says which set of texture coordinates it uses
     setUniform(program, "uBaseColorUVSet", material.baseColorTexture.uvSet);
     setUniform(program, "uMetallicRoughnessUVSet", material.metallicRoughnessTexture.uvSet);
+    setUniform(program, "uOcclusionUVSet", material.occlusionTexture.uvSet);
+    setUniform(program, "uEmissiveUVSet", material.emissiveTexture.uvSet);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, material.baseColorTexture.id);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, material.metallicRoughnessTexture.id);
+    glActiveTexture(GL_TEXTURE9);
+    glBindTexture(GL_TEXTURE_2D, material.occlusionTexture.id);
+    glActiveTexture(GL_TEXTURE10);
+    glBindTexture(GL_TEXTURE_2D, material.emissiveTexture.id);
 
     drawMesh(part.mesh);
   }
@@ -120,8 +155,8 @@ static void drawModel(GLuint program, const Model& model) {
 
 // Blend weights for one kind of view, 0 is physical and 1 is stylized
 static void setViewWeights(GLuint program, int view, const Settings& settings) {
-  float weights[4];
-  for (int i = 0; i < 4; i++) {
+  float weights[WEIGHT_COUNT];
+  for (int i = 0; i < WEIGHT_COUNT; i++) {
     if (view == VIEW_REALISTIC) {
       weights[i] = 0.0f;
     } else if (view == VIEW_TOON) {
@@ -134,6 +169,7 @@ static void setViewWeights(GLuint program, int view, const Settings& settings) {
   setUniform(program, "uWeightDiffuse", weights[1]);
   setUniform(program, "uWeightSpecular", weights[2]);
   setUniform(program, "uWeightAmbient", weights[3]);
+  setUniform(program, "uWeightReflections", weights[4]);
 }
 
 
@@ -200,8 +236,23 @@ static void drawAxisIndicator(GLuint lineProgram, const LineMesh& axes, const Ca
 }
 
 
+// Mip level of the environment shown as the blurred sky
+// With faces of 512 pixels, level 4 has faces of 32 pixels: the clouds and the horizon are still
+// there but soft, so the model stands out. Picked by eye.
+const float BLURRED_SKY_LEVEL = 4.0f;
+
+// Debug views in the order of the debug view menu
+// Kept in step by hand with DEBUG_VIEW_NAMES in ui.cpp and the uDebugView checks in
+// shaders/hybrid_main.glsl: a new view changes all three.
+const int DEBUG_LIT = 0;
+const int DEBUG_BASE_COLOR = 1;
+const int DEBUG_EMISSIVE = 2;
+const int DEBUG_SHADOW = 7;
+
+
 // Draw the scene once per strip of the current view mode
-void drawScene(GLuint program, GLuint lineProgram, const Model& model, GLuint rampTexture,
+void drawScene(GLuint program, GLuint skyProgram, GLuint lineProgram, const Model& model,
+               GLuint rampTexture, const EnvironmentMap& environment, GLuint brdfLookupTable, const Mesh& cube,
                const LineMesh& grid, const LineMesh& axes, const Camera& camera,
                const Settings& settings, int sceneWidth, int sceneHeight) {
   const int* views = VIEW_MODES[settings.viewMode];
@@ -209,11 +260,31 @@ void drawScene(GLuint program, GLuint lineProgram, const Model& model, GLuint ra
 
   glUseProgram(program);
   setSharedUniforms(program, model, camera, settings);
+  setEnvironmentUniforms(program, environment, settings);
+  setMethodUniforms(program, environment, brdfLookupTable, settings);
 
-  // The ramp is the same for every part of the model, so it is bound once on its own unit
+  // The sky is drawn only in the normal picture. Debug views keep the plain background,
+  // so the values they show are not mixed up with the sky.
+  bool drawSky = settings.backgroundChoice != BACKGROUND_PLAIN && settings.debugView == DEBUG_LIT;
+  float skyLevel = (settings.backgroundChoice == BACKGROUND_BLURRED_SKY) ? BLURRED_SKY_LEVEL : 0.0f;
+  glUseProgram(skyProgram);
+  setUniform(skyProgram, "uView", cameraView(camera));
+  setUniform(skyProgram, "uSkyLod", skyLevel);
+  setEnvironmentUniforms(skyProgram, environment, settings);
+
+  // The ramp, the environment and its maps are the same for every part of the model,
+  // so each is bound once on its own unit
   // Unit 0 is left active again, which is what the panel code expects.
+  glActiveTexture(GL_TEXTURE4);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, environment.cubemap);
   glActiveTexture(GL_TEXTURE5);
   glBindTexture(GL_TEXTURE_2D, rampTexture);
+  glActiveTexture(GL_TEXTURE6);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, environment.irradiance);
+  glActiveTexture(GL_TEXTURE7);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, environment.prefiltered);
+  glActiveTexture(GL_TEXTURE8);
+  glBindTexture(GL_TEXTURE_2D, brdfLookupTable);
   glActiveTexture(GL_TEXTURE0);
 
   // The scissor test keeps each strip from drawing into its neighbours
@@ -241,6 +312,17 @@ void drawScene(GLuint program, GLuint lineProgram, const Model& model, GLuint ra
     setViewWeights(program, views[i], settings);
     drawModel(program, model);
 
+    // The sky goes after the model, so it is only drawn where the model left the far depth.
+    // Its depth is exactly the far depth, which the usual test (less than) would reject, so
+    // the test lets equal depths pass while it is drawn.
+    if (drawSky) {
+      glUseProgram(skyProgram);
+      setUniform(skyProgram, "uProjection", projection);
+      glDepthFunc(GL_LEQUAL);
+      drawMesh(cube);
+      glDepthFunc(GL_LESS);
+    }
+
     // The grid is drawn after the model with the depth test on, so the model hides it.
     // It has its own shader, so the blend weights and the debug view do not change it.
     glUseProgram(lineProgram);
@@ -259,12 +341,6 @@ void drawScene(GLuint program, GLuint lineProgram, const Model& model, GLuint ra
   // so turn it off or the next clear only reaches the last strip.
   glDisable(GL_SCISSOR_TEST);
 }
-
-
-// Debug views in the order of the debug view menu
-const int DEBUG_LIT = 0;
-const int DEBUG_BASE_COLOR = 1;
-const int DEBUG_SHADOW = 5;
 
 
 // How much exposure and the tone curve one kind of view gets, 1 is all and 0 none
@@ -305,11 +381,11 @@ void drawToneMap(GLuint toneMapProgram, GLuint hdrImage, int sampleCount, GLuint
   setUniform(toneMapProgram, "uExposure", settings.exposure);
   setUniform(toneMapProgram, "uToneCurve", settings.toneCurve);
 
-  // Base color is a color, so it gets the sRGB step.
-  // Metallic, roughness, normal and shadow are data, so they are shown as stored.
+  // Base color and emissive are colors, so they get the sRGB step.
+  // Metallic, roughness, normal, occlusion and shadow are data, so they are shown as stored.
   // The lit picture and the light terms are colors that can go above 1.
   int sceneToSrgb = 1;
-  if (settings.debugView > DEBUG_BASE_COLOR && settings.debugView <= DEBUG_SHADOW) {
+  if (settings.debugView > DEBUG_EMISSIVE && settings.debugView <= DEBUG_SHADOW) {
     sceneToSrgb = 0;
   }
   setUniform(toneMapProgram, "uSceneToSrgb", sceneToSrgb);

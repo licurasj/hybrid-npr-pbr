@@ -6,6 +6,19 @@
 const int MODEL_SPHERE = 0;
 const int MODEL_SPHERE_GRID = 1;
 
+// Entries of the background menu
+const int BACKGROUND_SKY = 0;
+const int BACKGROUND_BLURRED_SKY = 1;
+const int BACKGROUND_PLAIN = 2;
+
+// Entries of the environment method menu
+// shaders/pbr_terms.glsl has the same numbers (METHOD_SIMPLE); change both together.
+const int METHOD_SIMPLE = 0;
+const int METHOD_PREFILTERED = 1;
+
+// Number of blend sliders: shadow, diffuse, specular, ambient and reflections
+const int WEIGHT_COUNT = 5;
+
 // Every value the control panel can change
 // The panel writes these and the drawing code reads them.
 struct Settings {
@@ -35,6 +48,20 @@ struct Settings {
   // Flat ambient color used by the stylized ambient
   glm::vec3 ambientColor = glm::vec3(0.2f, 0.2f, 0.2f);
 
+  // Environment image that lights the PBR side and is shown as the sky,
+  // in the order of the environment menu (0 is the partly cloudy sky)
+  int environmentChoice = 0;
+  // What is drawn behind the model, see BACKGROUND_SKY and the others above
+  // The environment lights the model and shows in its reflections whichever is picked.
+  int backgroundChoice = BACKGROUND_SKY;
+  // Turn of the environment around the vertical axis in degrees
+  float environmentRotation = 0.0f;
+  // Brightness factor for the whole environment: sky, fill light and reflections
+  float environmentIntensity = 1.0f;
+  // How the fill light and the reflections are worked out: the simple method reads the ordinary
+  // mip levels of the environment, the prefiltered method the maps made at startup
+  int environmentMethod = METHOD_PREFILTERED;
+
   // Which entry of the model menu is shown, see MODEL_SPHERE and MODEL_SPHERE_GRID below
   // The model files come after those two.
   int modelChoice = 0;
@@ -56,9 +83,9 @@ struct Settings {
   // Whether the toon highlight is dimmed by the ramp band it falls in
   bool highlightFollowsRamp = false;
 
-  // Blend weights for shadow, diffuse, specular and ambient
+  // Blend weights for shadow, diffuse, specular, ambient and reflections
   // 0 is physical and 1 is stylized.
-  float weights[4] = { 0.5f, 0.5f, 0.5f, 0.5f };
+  float weights[WEIGHT_COUNT] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
 
   // Blend weight for the tone mapping of the Hybrid view
   // 0 shows it like the PBR view and 1 like the NPR view.
